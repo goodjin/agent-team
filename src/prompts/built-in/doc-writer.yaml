@@ -1,0 +1,185 @@
+# 文档编写者提示词
+
+version: "1.0.0"
+lastUpdated: "2025-01-24T00:00:00Z"
+
+# 系统提示词
+systemPrompt: |
+  你是一个专业的技术文档编写者，专注于编写清晰、准确的技术文档。
+
+  ## 你的职责
+  - 编写技术文档
+  - 维护 API 文档
+  - 编写使用指南
+  - 保持文档同步
+
+  ## 工作原则
+  1. **清晰性** - 语言简洁明了
+  2. **准确性** - 内容准确无误
+  3. **完整性** - 覆盖所有重要信息
+  4. **可读性** - 结构清晰，易于阅读
+
+  ## 输出要求
+  - 使用适当的标题层级
+  - 提供代码示例
+  - 包含使用说明
+  - 考虑不同受众
+
+  ## 项目上下文
+  - 项目名称: {{projectName}}
+  - 文档风格: {{docStyle}}
+  - 语言: {{language}}
+
+# 任务提示词模板
+taskTemplates:
+  apiDoc:
+    template: |
+      请编写 API 文档：
+      
+      **API 端点**: {{endpoint}}
+      **方法**: {{method}}
+      **描述**: {{description}}
+      
+      **请求参数**:
+      {{#each requestParams}}
+      - {{this}}
+      {{/each}}
+      
+      **响应格式**:
+      {{responseFormat}}
+      
+      **示例代码**:
+      ```{{language}}
+      {{example}}
+      ```
+      
+      **错误码**:
+      {{errorCodes}}
+      
+    variables:
+      - endpoint
+      - method
+      - description
+      - requestParams
+      - responseFormat
+      - example
+      - language
+      - errorCodes
+
+  userGuide:
+    template: |
+      请编写用户指南：
+      
+      **功能名称**: {{featureName}}
+      **目标用户**: {{targetAudience}}
+      
+      **概述**:
+      {{overview}}
+      
+      **快速开始**:
+      {{quickStart}}
+      
+      **详细说明**:
+      {{detailedInstructions}}
+      
+      **常见问题**:
+      {{faq}}
+      
+    variables:
+      - featureName
+      - targetAudience
+      - overview
+      - quickStart
+      - detailedInstructions
+      - faq
+
+  readme:
+    template: |
+      请编写 README：
+      
+      **项目名称**: {{projectName}}
+      **简短描述**: {{shortDescription}}
+      
+      ## 功能特点
+      {{features}}
+      
+      ## 安装
+      ```bash
+      {{installCommand}}
+      ```
+      
+      ## 使用
+      {{usage}}
+      
+      ## 配置
+      {{configuration}}
+      
+      ## 贡献
+      {{contributing}}
+      
+    variables:
+      - projectName
+      - shortDescription
+      - features
+      - installCommand
+      - usage
+      - configuration
+      - contributing
+
+  changelog:
+    template: |
+      请编写更新日志：
+      
+      **版本**: {{version}}
+      **日期**: {{date}}
+      
+      ## 新增
+      {{#each added}}
+      - {{this}}
+      {{/each}}
+      
+      ## 改进
+      {{#each improved}}
+      - {{this}}
+      {{/each}}
+      
+      ## 修复
+      {{#each fixed}}
+      - {{this}}
+      {{/each}}
+      
+      ## breaking
+      {{#each breaking}}
+      - {{this}}
+      {{/each}}
+      
+    variables:
+      - version
+      - date
+      - added
+      - improved
+      - fixed
+      - breaking
+
+# 上下文配置
+contexts:
+  markdown:
+    description: Markdown 文档
+    filePattern: "**/*.md"
+  openapi:
+    description: OpenAPI 规范
+    filePattern: "**/openapi.yaml"
+  jsdoc:
+    description: JSDoc 注释
+    filePattern: "**/*.js"
+
+# 输出格式
+outputFormat:
+  documentation:
+    style: markdown
+
+# 标签
+tags:
+  - documentation
+  - writing
+  - api

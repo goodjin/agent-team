@@ -1,0 +1,119 @@
+# 安全规范规则
+
+id: security-rules
+name: 安全规范
+description: 代码安全规范，防止常见安全漏洞
+version: "1.0.0"
+enabled: true
+
+category: security
+priority: 100
+
+# 适用范围
+appliesTo:
+  - all
+
+# 规则列表
+rules:
+  - id: no-sql-injection
+    name: SQL注入防护
+    description: 禁止使用字符串拼接构造SQL语句
+    severity: critical
+    pattern: (?:['"`]|concat\s*\().*\$\{.*\}.*(?:FROM|WHERE|INSERT|UPDATE|DELETE|SELECT)
+    suggestion: "请使用参数化查询或 ORM 框架"
+    example: |
+      // 错误示例
+      query = "SELECT * FROM users WHERE id = " + userId;
+      
+      // 正确示例
+      query = "SELECT * FROM users WHERE id = ?";
+      db.execute(query, [userId]);
+
+  - id: no-hardcoded-secrets
+    name: 禁止硬编码密钥
+    description: 禁止在代码中硬编码密码、API Key等敏感信息
+    severity: critical
+    pattern: (?:password|secret|apikey|token|key|auth|credential)\s*[:=]\s*['"][^'"]{8,}['"]
+    suggestion: "请使用环境变量或配置文件管理敏感信息"
+    example: |
+      // 错误示例
+      const apiKey = "sk-xxx-xxx-xxx";
+      
+      // 正确示例
+      const apiKey = process.env.API_KEY;
+
+  - id: xss-prevention
+    name: XSS防护
+    description: 用户输入必须经过转义或使用安全的HTML渲染
+    severity: error
+    pattern: innerHTML\s*=.*\$\{.*(?:user|input|params|query).*\}
+    suggestion: "请使用 textContent 或安全的 HTML 渲染库"
+    example: |
+      // 错误示例
+      element.innerHTML = userInput;
+      
+      // 正确示例
+      element.textContent = userInput;
+
+  - id: command-injection
+    name: 命令注入防护
+    description: 禁止直接使用用户输入执行系统命令
+    severity: critical
+    pattern: (?:exec|spawn|eval|Function)\s*\([^)]*\$\{.*\}
+    suggestion: "请使用白名单验证或安全的 API"
+    example: |
+      // 错误示例
+      exec(`rm -rf ${userPath}`);
+      
+      // 正确示例
+      const sanitizedPath = sanitize(userPath);
+      exec(`rm -rf ${sanitizedPath}`);
+
+  - id: https-only
+    name: 强制使用 HTTPS
+    description: 生产环境应使用 HTTPS
+    severity: error
+    pattern: ['"]http://[^'"](?!localhost|127\.0\.0\.1)
+    suggestion: "生产环境请使用 HTTPS"
+
+  - id: no-sensitive-logging
+    name: 禁止记录敏感信息
+    description: 日志中不应包含敏感信息
+    severity: warning
+    pattern: (?:log|info|warn|error)\s*\([^)]*(?:password|secret|token|key|credit).*\)
+    suggestion: "请确保日志不包含敏感信息"
+
+  - id: jwt-validation
+    name: JWT验证
+    description: JWT token 应有正确的验证
+    severity: error
+    pattern: jwt\.(verify|sign)\([^)]*(?!secret|key)
+    suggestion: "请确保 JWT 验证时使用密钥"
+
+  - id: cors-origin
+    name: CORS 配置
+    description: 生产环境应限制 CORS 来源
+    severity: warning
+    pattern: Access-Control-Allow-Origin\s*:\s*['"]\*['"]
+    suggestion: "生产环境请指定具体的 CORS 来源"
+
+  - id: rate-limiting
+    name: 速率限制
+    description: API 端点应实现速率限制
+    severity: warning
+    pattern: (?:express|fastify|http)\.(listen|use)(?!\s*\(?\s*ratelimit)
+    suggestion: "请为 API 端点添加速率限制"
+
+# 规则例外
+exceptions:
+  - id: localhost-http
+    description: 本地开发环境允许 HTTP
+    pattern: "**/localhost/**"
+    rules:
+      - https-only
+
+  - id: test-secrets
+    description: 测试代码中可以使用测试密钥
+    pattern: "**/*.test.ts"
+    rules:
+      - no-hardcoded-secrets

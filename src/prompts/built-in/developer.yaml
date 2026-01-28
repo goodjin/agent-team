@@ -1,0 +1,165 @@
+# 开发者提示词
+
+version: "1.0.0"
+lastUpdated: "2025-01-24T00:00:00Z"
+
+# 系统提示词
+systemPrompt: |
+  你是一个专业且高效的开发者，专注于编写高质量、可维护的代码。
+
+  ## 你的职责
+  - 编写清晰、简洁的代码
+  - 遵循项目编码规范
+  - 编写必要的单元测试
+  - 进行代码审查和重构
+
+  ## 工作原则
+  1. **代码质量优先** - 不追求快速交付，坚持高质量代码
+  2. **简单优于复杂** - 用最简单的方案解决问题
+  3. **可维护性** - 编写易于理解和维护的代码
+  4. **测试驱动** - 先写测试，再写实现
+  5. **持续重构** - 不断改进代码质量
+
+  ## 输出要求
+  - 始终提供完整的代码实现
+  - 解释代码的设计思路
+  - 提供测试用例
+  - 考虑边界情况和错误处理
+  - 遵循项目约定的代码风格
+
+  ## 项目上下文
+  - 项目名称: {{projectName}}
+  - 项目路径: {{projectPath}}
+  - 代码风格: {{codeStyle}}
+  - 测试覆盖率要求: {{testCoverage}}%
+
+# 任务提示词模板
+taskTemplates:
+  featureDevelopment:
+    template: |
+      请开发以下功能：
+      
+      **功能标题**: {{title}}
+      **功能描述**: {{description}}
+      
+      **需求列表**:
+      {{#each requirements}}
+      - {{this}}
+      {{/each}}
+      
+      **输出要求**:
+      1. 提供完整的代码实现
+      2. 包含必要的类型定义
+      3. 编写单元测试
+      4. 更新相关文档
+      
+    variables:
+      - title
+      - description
+      - requirements
+
+  bugFix:
+    template: |
+      请修复以下 bug：
+      
+      **错误信息**: {{errorMessage}}
+      **相关代码**:
+      ```{{language}}
+      {{code}}
+      ```
+      
+      **期望行为**: {{expectedBehavior}}
+      **实际行为**: {{actualBehavior}}
+      
+      **分析要求**:
+      1. 分析问题根本原因
+      2. 提供修复方案
+      3. 编写回归测试
+      
+    variables:
+      - errorMessage
+      - code
+      - language
+      - expectedBehavior
+      - actualBehavior
+
+  codeReview:
+    template: |
+      请审查以下代码：
+      
+      **文件路径**: {{filePath}}
+      **审查重点**: {{reviewAspects}}
+      
+      **代码内容**:
+      ```{{language}}
+      {{code}}
+      ```
+      
+      **审查要求**:
+      1. 代码质量评估
+      2. 安全性检查
+      3. 性能分析
+      4. 可维护性建议
+      5. 测试覆盖评估
+      
+    variables:
+      - filePath
+      - reviewAspects
+      - code
+      - language
+
+  refactoring:
+    template: |
+      请重构以下代码：
+      
+      **文件路径**: {{filePath}}
+      **重构目标**: {{refactoringGoal}}
+      
+      **当前代码**:
+      ```{{language}}
+      {{code}}
+      ```
+      
+      **重构要求**:
+      1. 保持功能不变
+      2. 提高代码可读性
+      3. 改善代码结构
+      4. 减少代码重复
+      
+    variables:
+      - filePath
+      - refactoringGoal
+      - code
+      - language
+
+# 上下文配置
+contexts:
+  typescript:
+    description: TypeScript 项目
+    filePattern: "**/*.ts"
+  javascript:
+    description: JavaScript 项目
+    filePattern: "**/*.js"
+  react:
+    description: React 项目
+    filePattern: "**/{component,page,hook}.tsx"
+  nodejs:
+    description: Node.js 后端项目
+    filePattern: "**/{controller,service,model,router}.ts"
+
+# 输出格式
+outputFormat:
+  code:
+    language: typescript
+    style: pretty
+  tests:
+    framework: jest
+    coverage: true
+  documentation:
+    style: markdown
+
+# 标签
+tags:
+  - development
+  - coding
+  - implementation

@@ -1,0 +1,84 @@
+# 最佳实践规则
+
+id: best-practices
+name: 最佳实践
+description: 代码最佳实践规范
+version: "1.0.0"
+enabled: false
+
+category: best-practices
+priority: 60
+
+# 适用范围
+appliesTo:
+  - developer
+  - architect
+
+# 规则列表
+rules:
+  - id: DRY
+    name: 避免重复代码
+    description: 相同或相似的代码不应重复出现
+    severity: warning
+    pattern: |
+      // 简化检测：连续 3 行以上相同代码
+      ^(.{20,})\n\1\n\1
+    suggestion: "请提取重复代码为函数或组件"
+
+  - id: single-responsibility
+    name: 单一职责原则
+    description: 函数和类应只做一件事
+    severity: warning
+    pattern: function\s+[a-z][a-zA-Z0-9]*\s*\([^)]*\)[\s\S]{200,}
+    suggestion: "请将长函数拆分为多个小函数"
+
+  - id: type-definition
+    name: 使用类型定义
+    description: 应为复杂数据结构定义类型
+    severity: info
+    pattern: 'const\s+\w+\s*=\s*\{[^}]{50,\}[^}]*\}'
+    suggestion: "请为复杂对象定义类型或接口"
+
+  - id: error-message
+    name: 错误信息完整性
+    description: 错误信息应包含足够信息
+    severity: warning
+    pattern: throw\s+new\s+Error\s*\(\s*['"][^'"]{1,10}['"]\s*\)
+    suggestion: "请提供详细的错误信息"
+
+  - id: async-await
+    name: 优先使用 async/await
+    description: 异步操作应使用 async/await
+    severity: info
+    pattern: \.then\s*\([^)]*\)\s*=>\s*
+    suggestion: "请考虑使用 async/await 替代 Promise.then"
+
+  - id: object-freeze
+    name: 使用 Object.freeze
+    description: 不可变数据应使用 Object.freeze
+    severity: info
+    pattern: const\s+[A-Z][a-zA-Z0-9]*\s*=\s*\{[^}]+\}\s*(?!Object\.freeze)
+    suggestion: "对于配置对象，请使用 Object.freeze"
+
+  - id: early-return
+    name: 提前返回
+    description: 减少嵌套层级，使用提前返回
+    severity: info
+    pattern: if\s*\([^)]+\)\s*\{[\s\S]{100,}\s*if\s*\([^)]+\)\s*\{[\s\S]{100,}
+    suggestion: "请使用提前返回减少嵌套"
+
+  - id: no-dead-code
+    name: 移除死代码
+    description: 不应有无用的代码
+    severity: warning
+    pattern: (?:function|const|let)\s+[a-zA-Z_][a-zA-Z0-9_]*\s*[^{]*\{\s*\}(?!\s*(?:export|import))
+    suggestion: "请移除未使用的代码"
+
+# 规则例外
+exceptions:
+  - id: legacy-files
+    description: 遗留代码文件可豁免
+    pattern: "**/legacy/**"
+    rules:
+      - DRY
+      - single-responsibility

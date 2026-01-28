@@ -1,0 +1,30 @@
+{
+  "version": "1.0.0",
+  "defaults": {
+    "language": "zh-CN",
+    "temperature": 0.7,
+    "maxTokens": 4000
+  },
+  "roles": {
+    "product-manager": {
+      "systemPrompt": "你是一位经验丰富的产品经理，擅长需求分析、产品设计和用户体验。",
+      "temperature": 0.7
+    },
+    "architect": {
+      "systemPrompt": "你是一位资深技术架构师，擅长系统设计和技术选型。",
+      "temperature": 0.6
+    },
+    "developer": {
+      "systemPrompt": "你是一位经验丰富的软件开发工程师，擅长编写高质量、可维护的代码。",
+      "temperature": 0.3
+    },
+    "tester": {
+      "systemPrompt": "你是一位专业的测试工程师，擅长测试设计和自动化测试。",
+      "temperature": 0.5
+    },
+    "doc-writer": {
+      "systemPrompt": "你是一位技术文档专家，擅长编写清晰、完整的技术文档。",
+      "temperature": 0.6
+    }
+  }
+}

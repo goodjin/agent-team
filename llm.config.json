@@ -1,0 +1,307 @@
+{
+  "version": "1.0.0",
+  "defaultProvider": "anthropic-primary",
+  "fallbackOrder": [
+    "anthropic-primary",
+    "anthropic-secondary",
+    "openai-primary",
+    "qwen-primary",
+    "zhipu-primary",
+    "minimax-primary",
+    "kimi-primary",
+    "deepseek-primary"
+  ],
+  "providers": {
+    "anthropic-primary": {
+      "name": "Anthropic 主服务",
+      "provider": "anthropic",
+      "apiKey": "${ANTHROPIC_API_KEY}",
+      "models": {
+        "opus": {
+          "model": "claude-3-opus-20240229",
+          "maxTokens": 4000,
+          "temperature": 0.7,
+          "description": "最强大的模型，适合复杂任务"
+        },
+        "sonnet": {
+          "model": "claude-3-sonnet-20240229",
+          "maxTokens": 4000,
+          "temperature": 0.7,
+          "description": "平衡性能和成本"
+        },
+        "haiku": {
+          "model": "claude-3-haiku-20240307",
+          "maxTokens": 4000,
+          "temperature": 0.7,
+          "description": "快速且经济，适合简单任务"
+        }
+      },
+      "enabled": false
+    },
+    "anthropic-secondary": {
+      "name": "Anthropic 备用服务",
+      "provider": "anthropic",
+      "apiKey": "${ANTHROPIC_BACKUP_API_KEY}",
+      "models": {
+        "sonnet": {
+          "model": "claude-3-sonnet-20240229",
+          "maxTokens": 4000,
+          "temperature": 0.7
+        }
+      },
+      "enabled": false
+    },
+    "openai-primary": {
+      "name": "OpenAI 主服务",
+      "provider": "openai",
+      "apiKey": "${OPENAI_API_KEY}",
+      "baseURL": "https://api.openai.com/v1",
+      "models": {
+        "gpt4": {
+          "model": "gpt-4-turbo-preview",
+          "maxTokens": 4000,
+          "temperature": 0.7,
+          "description": "GPT-4 Turbo"
+        },
+        "gpt35": {
+          "model": "gpt-3.5-turbo",
+          "maxTokens": 4000,
+          "temperature": 0.7,
+          "description": "GPT-3.5 Turbo"
+        }
+      },
+      "enabled": false
+    },
+    "openai-azure": {
+      "name": "Azure OpenAI",
+      "provider": "openai",
+      "apiKey": "${AZURE_OPENAI_API_KEY}",
+      "baseURL": "https://your-resource.openai.azure.com/openai/deployments/your-deployment",
+      "models": {
+        "gpt4": {
+          "model": "gpt-4",
+          "maxTokens": 4000,
+          "temperature": 0.7
+        }
+      },
+      "enabled": false
+    },
+    "ollama-local": {
+      "name": "本地 Ollama",
+      "provider": "openai",
+      "apiKey": "ollama",
+      "baseURL": "http://localhost:11434/v1",
+      "models": {
+        "llama3": {
+          "model": "llama3",
+          "maxTokens": 4000,
+          "temperature": 0.7,
+          "description": "Llama 3 70B"
+        },
+        "mistral": {
+          "model": "mistral",
+          "maxTokens": 4000,
+          "temperature": 0.7,
+          "description": "Mistral 7B"
+        }
+      },
+      "enabled": false
+    },
+    "qwen-primary": {
+      "name": "通义千问 Qwen",
+      "provider": "openai",
+      "apiKey": "${DASHSCOPE_API_KEY}",
+      "baseURL": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "models": {
+        "qwen-max": {
+          "model": "qwen-max",
+          "maxTokens": 6000,
+          "temperature": 0.7,
+          "description": "通义千问超大规模语言模型，最强版本"
+        },
+        "qwen-plus": {
+          "model": "qwen-plus",
+          "maxTokens": 6000,
+          "temperature": 0.7,
+          "description": "通义千问增强版，平衡性能和成本"
+        },
+        "qwen-turbo": {
+          "model": "qwen-turbo",
+          "maxTokens": 8000,
+          "temperature": 0.7,
+          "description": "通义千问高速版，响应速度快"
+        },
+        "qwen-long": {
+          "model": "qwen-long",
+          "maxTokens": 10000,
+          "temperature": 0.7,
+          "description": "通义千问长文本版，支持30k上下文"
+        }
+      },
+      "enabled": false
+    },
+    "zhipu-primary": {
+      "name": "智谱 GLM",
+      "provider": "openai",
+      "apiKey": "${ZHIPU_API_KEY}",
+      "baseURL": "https://open.bigmodel.cn/api/coding/paas/v4",
+      "models": {
+        "glm-4": {
+          "model": "glm-4",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "智谱 GLM-4，最新版本"
+        },
+        "glm-4-plus": {
+          "model": "glm-4-plus",
+          "maxTokens": 128000,
+          "temperature": 0.7,
+          "description": "GLM-4 Plus，更强能力"
+        },
+        "glm-4-air": {
+          "model": "glm-4-air",
+          "maxTokens": 128000,
+          "temperature": 0.7,
+          "description": "GLM-4 Air，轻量高效"
+        },
+        "glm-4-flash": {
+          "model": "glm-4-flash",
+          "maxTokens": 128000,
+          "temperature": 0.7,
+          "description": "GLM-4 Flash，极速响应"
+        },
+        "glm-3-turbo": {
+          "model": "glm-3-turbo",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "GLM-3 Turbo，高速版"
+        }
+      },
+      "enabled": false
+    },
+    "minimax-primary": {
+      "name": "MiniMax",
+      "provider": "openai",
+      "apiKey": "${MINIMAX_API_KEY}",
+      "baseURL": "https://api.minimax.chat/v1",
+      "models": {
+        "abab6.5s-chat": {
+          "model": "abab6.5s-chat",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "MiniMax ABAB6.5s，高速版"
+        },
+        "abab6.5-chat": {
+          "model": "abab6.5-chat",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "MiniMax ABAB6.5，标准版"
+        },
+        "abab5.5-chat": {
+          "model": "abab5.5-chat",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "MiniMax ABAB5.5，经济版"
+        }
+      },
+      "enabled": false
+    },
+    "kimi-primary": {
+      "name": "Kimi 月之暗面",
+      "provider": "openai",
+      "apiKey": "${MOONSHOT_API_KEY}",
+      "baseURL": "https://api.moonshot.cn/v1",
+      "models": {
+        "moonshot-v1-128k": {
+          "model": "moonshot-v1-128k",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "Kimi v1 128k，超长上下文"
+        },
+        "moonshot-v1-32k": {
+          "model": "moonshot-v1-32k",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "Kimi v1 32k，长上下文"
+        },
+        "moonshot-v1-8k": {
+          "model": "moonshot-v1-8k",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "Kimi v1 8k，标准版"
+        }
+      },
+      "enabled": false
+    },
+    "deepseek-primary": {
+      "name": "DeepSeek",
+      "provider": "openai",
+      "apiKey": "${DEEPSEEK_API_KEY}",
+      "baseURL": "https://api.deepseek.com",
+      "models": {
+        "deepseek-chat": {
+          "model": "deepseek-chat",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "DeepSeek Chat，通用对话模型"
+        },
+        "deepseek-coder": {
+          "model": "deepseek-coder",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "DeepSeek Coder，代码专用模型"
+        }
+      },
+      "enabled": false
+    },
+    "invada-primary": {
+      "name": "Involer (英码)",
+      "provider": "openai",
+      "apiKey": "${INVADA_API_KEY}",
+      "baseURL": "https://api.invoda.cn/v1",
+      "models": {
+        "invada-lite": {
+          "model": "invada-lite",
+          "maxTokens": 4096,
+          "temperature": 0.7,
+          "description": "Involer Lite，轻量版"
+        },
+        "invada-pro": {
+          "model": "invada-pro",
+          "maxTokens": 8192,
+          "temperature": 0.7,
+          "description": "Involer Pro，专业版"
+        }
+      },
+      "enabled": false
+    }
+  },
+  "roleMapping": {
+    "product-manager": {
+      "providerName": "zhipu-primary",
+      "modelName": "glm-4"
+    },
+    "architect": {
+      "providerName": "zhipu-primary",
+      "modelName": "glm-4-plus"
+    },
+    "developer": [
+      {
+        "providerName": "zhipu-primary",
+        "modelName": "glm-4"
+      },
+      {
+        "providerName": "zhipu-primary",
+        "modelName": "glm-4-plus"
+      }
+    ],
+    "tester": {
+      "providerName": "zhipu-primary",
+      "modelName": "glm-4-flash"
+    },
+    "doc-writer": {
+      "providerName": "zhipu-primary",
+      "modelName": "glm-4-air"
+    }
+  }
+}
