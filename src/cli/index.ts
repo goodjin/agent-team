@@ -218,7 +218,7 @@ export class CLIUtils {
  * 显示配置信息
  */
 export async function showConfig(): Promise<void> {
-  CLIUtils.title('Project Agent 配置');
+  CLIUtils.title('Agent Team 配置');
 
   try {
     const { config } = await loadConfig();
@@ -270,10 +270,10 @@ export async function showConfig(): Promise<void> {
  */
 export function showHelp(): void {
   console.log(`
-Project Agent CLI 命令
+Agent Team CLI 命令
 
 用法:
-  npx project-agent <命令> [选项]
+  npx agent-team <命令> [选项]
 
 命令:
   init              初始化配置
@@ -285,10 +285,10 @@ Project Agent CLI 命令
   help              显示帮助
 
 示例:
-  npx project-agent init           # 初始化配置 AI 对
-  npx project-agent role list      # 查看所有角色
-  npx project-agent config show    # 显示当前配置
-  npx project-agent chat          # 启动对话
+  npx agent-team init           # 初始化配置 AI 对
+  npx agent-team role list      # 查看所有角色
+  npx agent-team config show    # 显示当前配置
+  npx agent-team chat          # 启动对话
 
 详细文档请访问: https://github.com/project-agent/docs
 `);
@@ -301,5 +301,5 @@ export function showVersion(): void {
   const packageJson = JSON.parse(
     require('fs').readFileSync('./package.json', 'utf-8')
   );
-  console.log(`Project Agent v${packageJson.version}`);
+  console.log(`Agent Team v${packageJson.version}`);
 }

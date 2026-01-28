@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Project Agent CLI 入口
+ * Agent Team CLI 入口
  */
 
 import { handleConfigCommand } from './commands/config.js';
@@ -67,7 +67,7 @@ async function main() {
  */
 async function startChat() {
   try {
-    CLIUtils.title('Project Agent - AI 对话模式');
+    CLIUtils.title('Agent Team - AI 对话模式');
     
     const agent = new ProjectAgent({
       projectName: process.cwd().split('/').pop() || 'project',
@@ -93,7 +93,7 @@ async function startChat() {
           maxFileSize: config.logging.maxFileSize,
           maxFiles: config.logging.maxFiles,
         });
-        logger.info('Project Agent 启动', { projectName: process.cwd().split('/').pop() || 'project' });
+        logger.info('Agent Team 启动', { projectName: process.cwd().split('/').pop() || 'project' });
       }
     } catch (error) {
       // 如果加载配置失败，使用默认日志配置
@@ -140,8 +140,8 @@ async function startChat() {
       }
 
       console.log('💡 请先配置 LLM 提供商：');
-      console.log('  1. 运行 "project-agent config show" 查看配置');
-      console.log('  2. 运行 "project-agent config test" 测试配置');
+      console.log('  1. 运行 "agent-team config show" 查看配置');
+      console.log('  2. 运行 "agent-team config test" 测试配置');
       console.log('  3. 编辑 ~/.agent-team/config.yaml 启用提供商');
       CLIUtils.blank();
       
@@ -185,7 +185,7 @@ async function startChat() {
       console.log(errorMessage);
     } else {
       CLIUtils.error(`启动失败: ${errorMessage}`);
-      CLIUtils.info('💡 请检查配置文件或运行 "project-agent config test" 诊断问题');
+      CLIUtils.info('💡 请检查配置文件或运行 "agent-team config test" 诊断问题');
     }
     
     CLIUtils.blank();
@@ -197,7 +197,7 @@ async function startChat() {
  * 初始化配置
  */
 async function initConfig() {
-  CLIUtils.title('Project Agent 初始化配置');
+  CLIUtils.title('Agent Team 初始化配置');
 
   try {
     const { loadConfig, configExists } = await import('../config/config-loader.js');
@@ -220,7 +220,7 @@ async function initConfig() {
     await fs.mkdir(configDir, { recursive: true });
 
     // 创建默认配置
-    const defaultConfig = `# Project Agent 配置文件
+    const defaultConfig = `# Agent Team 配置文件
 # 位置: ${configPath}
 
 llm:

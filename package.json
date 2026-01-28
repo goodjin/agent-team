@@ -1,12 +1,12 @@
 {
-  "name": "project-agent",
+  "name": "agent-team",
   "version": "1.0.0",
   "description": "A multi-role AI agent system for project management and development",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "type": "module",
   "bin": {
-    "project-agent": "./dist/cli/cli.js"
+    "agent-team": "./dist/cli/cli.js"
   },
   "scripts": {
     "build": "tsc",

@@ -210,6 +210,6 @@ async function showConfigPath(): Promise<void> {
     CLIUtils.info(`配置文件路径: ${configPath}`);
   } else {
     CLIUtils.warning('未找到配置文件');
-    console.log('使用默认配置或运行 "npx project-agent init" 初始化');
+    console.log('使用默认配置或运行 "npx agent-team init" 初始化');
   }
 }

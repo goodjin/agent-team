@@ -319,8 +319,8 @@ read_file
 
         errorMessages.push('');
         errorMessages.push('💡 解决方案：');
-        errorMessages.push('  1. 运行 "project-agent config show" 查看当前配置');
-        errorMessages.push('  2. 运行 "project-agent config test" 测试配置');
+        errorMessages.push('  1. 运行 "agent-team config show" 查看当前配置');
+        errorMessages.push('  2. 运行 "agent-team config test" 测试配置');
         errorMessages.push('  3. 编辑 ~/.agent-team/config.yaml 启用并配置提供商');
         errorMessages.push('  4. 设置环境变量，例如：export ANTHROPIC_API_KEY=sk-ant-xxx');
 
