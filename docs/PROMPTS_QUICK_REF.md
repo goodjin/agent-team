@@ -5,7 +5,7 @@
 ### 配置文件位置
 
 ```
-project-agent/
+agent-team/
 ├── prompts/                      # 提示词配置目录
 │   ├── config.json              # 主配置
 │   ├── roles/                   # 角色提示词
@@ -33,7 +33,7 @@ OPENAI_API_KEY=sk-xxxxx
 ### 方式一：使用配置目录（推荐）
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 
 const agent = new ProjectAgent(
   {
@@ -104,7 +104,7 @@ await agent.loadPrompts();
 ## 使用场景变体
 
 ```typescript
-import { RoleFactory } from 'project-agent';
+import { RoleFactory } from 'agent-team';
 
 // 创建 B2B 场景的产品经理
 const b2bPM = RoleFactory.createRole(
@@ -124,7 +124,7 @@ const b2cPM = RoleFactory.createRole(
 ## 使用任务模板
 
 ```typescript
-import { getPromptLoader } from 'project-agent';
+import { getPromptLoader } from 'agent-team';
 
 const loader = getPromptLoader();
 await loader.loadFromDirectory('./prompts');

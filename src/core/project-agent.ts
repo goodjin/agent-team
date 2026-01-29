@@ -529,4 +529,18 @@ export class ProjectAgent {
   updateConfig(updates: Partial<ProjectConfig>): void {
     this.config = { ...this.config, ...updates };
   }
+
+  /**
+   * 获取任务管理器（用于HTTP服务器等需要直接访问的场景）
+   */
+  getTaskManager(): TaskManager {
+    return this.taskManager;
+  }
+
+  /**
+   * 获取工具注册表（用于HTTP服务器等需要直接访问的场景）
+   */
+  getToolRegistry(): ToolRegistry {
+    return this.toolRegistry;
+  }
 }

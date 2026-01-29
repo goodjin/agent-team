@@ -71,6 +71,33 @@ export interface RoleDefinition {
   maxTokens?: number;
 }
 
+// 对话消息
+export interface TaskMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+  metadata?: Record<string, any>;
+}
+
+// 执行记录
+export interface TaskExecutionRecord {
+  id: string;
+  role: RoleType;
+  action: string; // 执行的动作描述
+  startTime: Date;
+  endTime?: Date;
+  duration?: number; // 执行时长（毫秒）
+  tokensUsed?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  model?: string; // 使用的模型
+  provider?: string; // 使用的服务商
+  result?: ToolResult;
+  error?: string;
+}
+
 // 任务定义
 export interface Task {
   id: string;
@@ -80,7 +107,8 @@ export interface Task {
   status: TaskStatus;
   priority: Priority;
   dependencies?: string[]; // 依赖的任务 ID
-  assignedRole?: RoleType;
+  assignedRole?: RoleType; // 负责的角色（项目经理或执行角色）
+  ownerRole?: RoleType; // 任务所有者（项目经理，负责拆分和验收）
   input?: any;
   output?: any;
   constraints?: TaskConstraints;
@@ -91,6 +119,10 @@ export interface Task {
   completedAt?: Date;
   subtasks?: Task[]; // 子任务
   result?: ToolResult;
+  // 新增字段
+  messages?: TaskMessage[]; // 对话历史
+  executionRecords?: TaskExecutionRecord[]; // 执行记录
+  summary?: string; // 任务总结
 }
 
 // 任务约束
@@ -195,6 +227,8 @@ export type AgentEvent =
   | 'task:failed'
   | 'task:blocked'
   | 'task:deleted'
+  | 'task:message:added'
+  | 'task:execution:recorded'
   | 'workflow:started'
   | 'workflow:completed'
   | 'workflow:failed'

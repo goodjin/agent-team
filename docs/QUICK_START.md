@@ -5,14 +5,14 @@
 ## 安装
 
 ```bash
-npm install project-agent
+npm install agent-team
 ```
 
 或者克隆仓库：
 
 ```bash
 git clone <repository-url>
-cd project-agent
+cd agent-team
 npm install
 npm run build
 ```
@@ -38,7 +38,7 @@ OPENAI_API_KEY=your_key_here
 ### 1. 创建你的第一个 Agent
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 
 const agent = new ProjectAgent({
   projectName: 'my-app',
@@ -267,7 +267,7 @@ agent.on('workflow:completed', (data) => {
 ## 自定义角色
 
 ```typescript
-import { BaseRole } from 'project-agent';
+import { BaseRole } from 'agent-team';
 
 class SecurityExpert extends BaseRole {
   constructor(llmService) {
@@ -311,7 +311,7 @@ class SecurityExpert extends BaseRole {
 }
 
 // 注册自定义角色
-import { RoleFactory } from 'project-agent';
+import { RoleFactory } from 'agent-team';
 RoleFactory.registerRole('security-expert', SecurityExpert);
 ```
 

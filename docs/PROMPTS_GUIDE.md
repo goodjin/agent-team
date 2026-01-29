@@ -145,7 +145,7 @@ taskTemplates:
 ### 使用提示词管理器
 
 ```typescript
-import { loadPrompts, getVersionManager } from 'project-agent';
+import { loadPrompts, getVersionManager } from 'agent-team';
 
 const { prompts } = await loadPrompts({
   roleId: 'developer',
@@ -160,7 +160,7 @@ const developerPrompt = prompts.get('developer');
 ### 使用变量解析器
 
 ```typescript
-import { VariableParser, replaceVariables } from 'project-agent';
+import { VariableParser, replaceVariables } from 'agent-team';
 
 const parser = new VariableParser();
 parser.setValues({
@@ -183,7 +183,7 @@ const result = replaceVariables(
 ### 使用模板渲染器
 
 ```typescript
-import { createTemplateRenderer } from 'project-agent';
+import { createTemplateRenderer } from 'agent-team';
 
 const taskTemplates = {
   featureDevelopment: {
@@ -203,7 +203,7 @@ console.log(result.content);
 ### 版本管理
 
 ```typescript
-import { getVersionManager } from 'project-agent';
+import { getVersionManager } from 'agent-team';
 
 const versionManager = getVersionManager();
 
@@ -224,31 +224,31 @@ const restored = await versionManager.restoreFromSnapshot(snapshotId);
 
 ```bash
 # 查看所有提示词
-npx project-agent prompt list
+npx agent-team prompt list
 
 # 查看提示词详情
-npx project-agent prompt show <role-id>
+npx agent-team prompt show <role-id>
 
 # 编辑提示词
-npx project-agent prompt edit <role-id>
+npx agent-team prompt edit <role-id>
 
 # 导出提示词
-npx project-agent prompt export <role-id> > prompt.yaml
+npx agent-team prompt export <role-id> > prompt.yaml
 
 # 导入提示词
-npx project-agent prompt import <role-id> < prompt.yaml
+npx agent-team prompt import <role-id> < prompt.yaml
 
 # 重置提示词（恢复默认）
-npx project-agent prompt reset <role-id>
+npx agent-team prompt reset <role-id>
 
 # 对比提示词差异
-npx project-agent prompt diff <role-id> <other-prompt.yaml>
+npx agent-team prompt diff <role-id> <other-prompt.yaml>
 
 # 查看提示词历史
-npx project-agent prompt history <role-id>
+npx agent-team prompt history <role-id>
 
 # 回滚到指定版本
-npx project-agent prompt rollback <role-id> <version>
+npx agent-team prompt rollback <role-id> <version>
 ```
 
 ## 自定义提示词
@@ -313,7 +313,7 @@ systemPrompt: |
 ## 常见问题
 
 ### Q: 如何恢复误修改的提示词？
-A: 使用 `npx project-agent prompt reset <role-id>` 命令恢复默认提示词。
+A: 使用 `npx agent-team prompt reset <role-id>` 命令恢复默认提示词。
 
 ### Q: 提示词不生效？
 A: 检查文件格式是否正确，确保文件位于正确目录。

@@ -75,7 +75,7 @@
 ### 基本使用（自动重试）
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 import { config } from 'dotenv';
 
 config(); // 加载环境变量

@@ -169,6 +169,8 @@ async function startChat() {
       mode: ExecutionMode.INTERACTIVE,
       showProgress: true,
       autoConfirm: false,
+      useEnhancedUI: true, // 默认使用增强UI
+      useInkUI: true, // 默认使用 Ink UI（类似 Claude Code）
     });
 
     CLIUtils.success('AI 对话模式已启动');

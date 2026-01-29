@@ -9,10 +9,13 @@ import type {
   AgentEvent,
   AgentEventData,
   ExecutionContext,
+  TaskMessage,
+  TaskExecutionRecord,
 } from '../types/index.js';
 import { RoleFactory } from '../roles/index.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
 import { LLMServiceFactory } from '../services/llm.service.js';
+import { getLLMConfigManager } from '../services/llm-config.js';
 import type { ProjectConfig } from '../types/index.js';
 import { BaseRole } from '../roles/base.js';
 import type { LLMService } from '../services/llm.service.js';
@@ -55,25 +58,28 @@ export class TaskManager extends EventEmitter {
    * 创建任务
    */
   createTask(params: {
-    type: TaskType;
+    type?: TaskType;
     title: string;
     description: string;
     priority?: Priority;
     dependencies?: string[];
     assignedRole?: Task['assignedRole'];
+    ownerRole?: Task['ownerRole'];
     input?: any;
     constraints?: Task['constraints'];
     subtasks?: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'status'>[];
+    initialMessage?: string; // 初始用户消息
   }): Task {
     const task: Task = {
       id: uuidv4(),
-      type: params.type,
+      type: params.type || 'custom',
       title: params.title,
       description: params.description,
       status: 'pending',
       priority: params.priority || 'medium',
       dependencies: params.dependencies || [],
       assignedRole: params.assignedRole,
+      ownerRole: params.ownerRole,
       input: params.input,
       constraints: params.constraints,
       metadata: {},
@@ -86,6 +92,12 @@ export class TaskManager extends EventEmitter {
         createdAt: new Date(),
         updatedAt: new Date(),
       })) || [],
+      messages: params.initialMessage ? [{
+        role: 'user',
+        content: params.initialMessage,
+        timestamp: new Date(),
+      }] : [],
+      executionRecords: [],
     };
 
     this.tasks.set(task.id, task);
@@ -97,6 +109,59 @@ export class TaskManager extends EventEmitter {
     } as AgentEventData);
 
     return task;
+  }
+
+  /**
+   * 添加消息到任务
+   */
+  addMessage(taskId: string, message: TaskMessage): void {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      throw new Error(`Task not found: ${taskId}`);
+    }
+
+    if (!task.messages) {
+      task.messages = [];
+    }
+
+    task.messages.push(message);
+    task.updatedAt = new Date();
+
+    this.emit('task:message:added', {
+      event: 'task:message:added',
+      timestamp: new Date(),
+      data: { taskId, message },
+    } as AgentEventData);
+  }
+
+  /**
+   * 添加执行记录
+   */
+  addExecutionRecord(taskId: string, record: Omit<TaskExecutionRecord, 'id'>): TaskExecutionRecord {
+    const task = this.tasks.get(taskId);
+    if (!task) {
+      throw new Error(`Task not found: ${taskId}`);
+    }
+
+    if (!task.executionRecords) {
+      task.executionRecords = [];
+    }
+
+    const fullRecord: TaskExecutionRecord = {
+      id: uuidv4(),
+      ...record,
+    };
+
+    task.executionRecords.push(fullRecord);
+    task.updatedAt = new Date();
+
+    this.emit('task:execution:recorded', {
+      event: 'task:execution:recorded',
+      timestamp: new Date(),
+      data: { taskId, record: fullRecord },
+    } as AgentEventData);
+
+    return fullRecord;
   }
 
   /**
@@ -214,8 +279,44 @@ export class TaskManager extends EventEmitter {
         );
       }
 
+      // 记录执行开始
+      const executionStartTime = new Date();
+      const roleType = task.assignedRole || 'developer';
+      
+      // 获取使用的模型信息
+      const manager = getLLMConfigManager();
+      const roleLLMConfig = manager.getRoleLLMConfig(roleType);
+      const modelInfo = roleLLMConfig ? {
+        model: roleLLMConfig.model,
+        provider: roleLLMConfig.provider,
+      } : undefined;
+
       // 执行任务
       const result = await role.execute(task, context);
+
+      // 记录执行结束
+      const executionEndTime = new Date();
+      const duration = executionEndTime.getTime() - executionStartTime.getTime();
+
+      // 从result.metadata中提取tokens信息
+      const tokensUsed = result.metadata?.tokensUsed || result.metadata?.usage;
+
+      // 添加执行记录
+      this.addExecutionRecord(taskId, {
+        role: roleType,
+        action: `执行任务: ${task.title}`,
+        startTime: executionStartTime,
+        endTime: executionEndTime,
+        duration,
+        result,
+        tokensUsed: tokensUsed ? {
+          promptTokens: tokensUsed.promptTokens || tokensUsed.inputTokens || 0,
+          completionTokens: tokensUsed.completionTokens || tokensUsed.outputTokens || 0,
+          totalTokens: tokensUsed.totalTokens || (tokensUsed.promptTokens || 0) + (tokensUsed.completionTokens || 0),
+        } : undefined,
+        model: modelInfo?.model || result.metadata?.model,
+        provider: modelInfo?.provider || result.metadata?.provider,
+      });
 
       // 设置结果
       this.setTaskResult(taskId, result);

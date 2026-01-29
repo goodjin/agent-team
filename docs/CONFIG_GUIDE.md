@@ -322,7 +322,7 @@ rules:
 运行以下命令验证配置：
 
 ```bash
-npx project-agent config test
+npx agent-team config test
 ```
 
 ## 从旧配置迁移
@@ -330,7 +330,7 @@ npx project-agent config test
 如果之前使用 `llm.config.json`，可以运行迁移命令：
 
 ```bash
-npx project-agent config migrate --from llm.config.json
+npx agent-team config migrate --from llm.config.json
 ```
 
 ## 常见问题

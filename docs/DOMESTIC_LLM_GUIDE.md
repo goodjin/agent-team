@@ -49,7 +49,7 @@ INVADA_API_KEY=xxxxx
 ### 3. 代码中使用
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 
 const agent = new ProjectAgent(
   {

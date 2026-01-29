@@ -15,7 +15,7 @@ npm run chat
 或者：
 
 ```typescript
-import { createHybridModeManager } from 'project-agent';
+import { createHybridModeManager } from 'agent-team';
 
 const hybrid = createHybridModeManager(agent);
 await hybrid.startInteractiveSession();

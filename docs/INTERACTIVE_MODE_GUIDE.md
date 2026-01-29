@@ -25,7 +25,7 @@ Project Agent 现在支持**混合模式**，可以自由切换交互式和自�
 ### 1. 交互式模式（默认）
 
 ```typescript
-import { ProjectAgent, createHybridModeManager, ExecutionMode } from 'project-agent';
+import { ProjectAgent, createHybridModeManager, ExecutionMode } from 'agent-team';
 
 const agent = new ProjectAgent(
   { projectName: 'my-app', projectPath: process.cwd() },
@@ -233,7 +233,7 @@ hybrid.setMode(ExecutionMode.INTERACTIVE);
 ## 自定义交互式流程
 
 ```typescript
-import { InteractiveCLI } from 'project-agent';
+import { InteractiveCLI } from 'agent-team';
 
 const cli = new InteractiveCLI({ colorOutput: true });
 
@@ -296,7 +296,7 @@ enum ExecutionMode {
 ### 完整示例：交互式功能开发
 
 ```typescript
-import { ProjectAgent, createHybridModeManager, ExecutionMode } from 'project-agent';
+import { ProjectAgent, createHybridModeManager, ExecutionMode } from 'agent-team';
 import { config } from 'dotenv';
 
 config();

@@ -71,7 +71,7 @@ Project Agent 支持灵活的多服务商配置，可以为不同角色设置不
 ### 方式一：初始化时指定配置文件
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 
 const agent = new ProjectAgent(
   {
@@ -106,7 +106,7 @@ await agent.setLLMConfigPath('./llm.config.json');
 ### 方式三：编程方式配置
 
 ```typescript
-import { getLLMConfigManager } from 'project-agent';
+import { getLLMConfigManager } from 'agent-team';
 
 const manager = getLLMConfigManager();
 
@@ -409,7 +409,7 @@ console.log('角色映射:', config.roleMapping);
 ### 保存配置
 
 ```typescript
-import { getLLMConfigManager } from 'project-agent';
+import { getLLMConfigManager } from 'agent-team';
 
 const manager = getLLMConfigManager();
 
@@ -424,7 +424,7 @@ await manager.saveToFile('./llm.config.new.json');
 ## 完整示例
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 
 // 1. 创建 Agent 并加载配置
 const agent = new ProjectAgent(

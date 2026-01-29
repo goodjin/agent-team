@@ -178,8 +178,8 @@ async function basicExample() {
 
     const reviewResult = await agent.execute({
       type: 'code-review',
-      title: '',
-      description:审查登录模块代码 '审查登录模块的代码质量、安全性和最佳实践',
+      title: '审查登录模块代码',
+      description: '审查登录模块的代码质量、安全性和最佳实践',
       assignedRole: 'developer',
       input: {
         filePath: './src/auth/login.ts',

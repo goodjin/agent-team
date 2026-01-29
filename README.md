@@ -23,7 +23,7 @@
 ```bash
 # 克隆项目
 git clone <repository-url>
-cd project-agent
+cd agent-team
 
 # 安装依赖
 npm install
@@ -31,20 +31,20 @@ npm install
 # 构建项目
 npm run build
 
-# 链接到全局（使 project-agent 命令可用）
+# 链接到全局（使 agent-team 命令可用）
 npm link
 ```
 
 ### 方式 2：全局安装
 
 ```bash
-npm install -g project-agent
+npm install -g agent-team
 ```
 
 ### 方式 3：使用 npx（无需安装）
 
 ```bash
-npx project-agent <command>
+npx agent-team <command>
 ```
 
 ## 快速开始
@@ -53,15 +53,15 @@ npx project-agent <command>
 
 ```bash
 # 交互式初始化配置
-project-agent init
+agent-team init
 # 或使用 npx
-npx project-agent init
+npx agent-team init
 
 # 查看配置
-project-agent config show
+agent-team config show
 
 # 测试配置
-project-agent config test
+agent-team config test
 ```
 
 ### 2. 配置 API Key
@@ -77,19 +77,19 @@ export ZHIPU_API_KEY=glm-xxx
 
 ```bash
 # 启动 AI 对话（类似 Claude Code）
-project-agent chat
+agent-team chat
 
 # 查看配置
-project-agent config show
+agent-team config show
 
 # 管理角色
-project-agent role list
+agent-team role list
 
 # 管理规则
-project-agent rule list
+agent-team rule list
 
 # 查看帮助
-project-agent help
+agent-team help
 ```
 
 **注意**：如果使用 `npm link` 后命令仍不可用，请确保：
@@ -102,7 +102,7 @@ project-agent help
 ### 基本使用
 
 ```typescript
-import { ProjectAgent, createIntelligentAgent } from 'project-agent';
+import { ProjectAgent, createIntelligentAgent } from 'agent-team';
 
 const agent = new ProjectAgent({
   projectName: 'my-app',
@@ -152,48 +152,48 @@ await agent.executeWorkflow('feature-development');
 ### 配置管理
 
 ```bash
-npx project-agent config show     # 显示配置
-npx project-agent config test    # 测试配置
-npx project-agent config edit    # 编辑配置
-npx project-agent config reset   # 重置配置
+npx agent-team config show     # 显示配置
+npx agent-team config test    # 测试配置
+npx agent-team config edit    # 编辑配置
+npx agent-team config reset   # 重置配置
 ```
 
 ### 角色管理
 
 ```bash
-npx project-agent role list      # 列出角色
-npx project-agent role show <id> # 显示角色详情
-npx project-agent role create    # 创建角色
-npx project-agent role edit     # 编辑角色
-npx project-agent role delete   # 删除角色
-npx project-agent role enable   # 启用角色
-npx project-agent role disable  # 禁用角色
+npx agent-team role list      # 列出角色
+npx agent-team role show <id> # 显示角色详情
+npx agent-team role create    # 创建角色
+npx agent-team role edit     # 编辑角色
+npx agent-team role delete   # 删除角色
+npx agent-team role enable   # 启用角色
+npx agent-team role disable  # 禁用角色
 ```
 
 ### 提示词管理
 
 ```bash
-npx project-agent prompt list    # 列出提示词
-npx project-agent prompt show   # 显示提示词
-npx project-agent prompt edit   # 编辑提示词
-npx project-agent prompt reset  # 重置提示词
+npx agent-team prompt list    # 列出提示词
+npx agent-team prompt show   # 显示提示词
+npx agent-team prompt edit   # 编辑提示词
+npx agent-team prompt reset  # 重置提示词
 ```
 
 ### 规则管理
 
 ```bash
-npx project-agent rule list     # 列出规则
-npx project-agent rule show    # 显示规则
-npx project-agent rule enable # 启用规则
-npx project-agent rule disable # 禁用规则
-npx project-agent rule create # 创建规则
-npx project-agent rule delete # 删除规则
+npx agent-team rule list     # 列出规则
+npx agent-team rule show    # 显示规则
+npx agent-team rule enable # 启用规则
+npx agent-team rule disable # 禁用规则
+npx agent-team rule create # 创建规则
+npx agent-team rule delete # 删除规则
 ```
 
 ### AI 对话
 
 ```bash
-npx project-agent chat         # 启动交互式对话
+npx agent-team chat         # 启动交互式对话
 ```
 
 ## 配置说明
@@ -277,7 +277,7 @@ rules:
 ## 项目结构
 
 ```
-project-agent/
+agent-team/
 ├── src/
 │   ├── ai/               # AI Agent
 │   ├── cli/              # 命令行界面

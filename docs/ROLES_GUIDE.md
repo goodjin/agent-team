@@ -145,7 +145,7 @@ promptEnhancement: |
 ### 使用角色管理器
 
 ```typescript
-import { getRoleManager } from 'project-agent';
+import { getRoleManager } from 'agent-team';
 
 const manager = getRoleManager();
 
@@ -181,7 +181,7 @@ await manager.deleteRole('security-expert');
 ### 使用角色加载器
 
 ```typescript
-import { loadRoles, loadRole } from 'project-agent';
+import { loadRoles, loadRole } from 'agent-team';
 
 // 加载所有角色
 const { roles, loaded, errors } = await loadRoles({
@@ -198,31 +198,31 @@ const developer = await loadRole('developer');
 
 ```bash
 # 查看所有角色
-npx project-agent role list
+npx agent-team role list
 
 # 查看角色详情
-npx project-agent role show <role-id>
+npx agent-team role show <role-id>
 
 # 创建新角色
-npx project-agent role create <role-id>
+npx agent-team role create <role-id>
 
 # 编辑角色
-npx project-agent role edit <role-id>
+npx agent-team role edit <role-id>
 
 # 禁用角色
-npx project-agent role disable <role-id>
+npx agent-team role disable <role-id>
 
 # 启用角色
-npx project-agent role enable <role-id>
+npx agent-team role enable <role-id>
 
 # 删除角色（仅限自定义角色）
-npx project-agent role delete <role-id>
+npx agent-team role delete <role-id>
 
 # 导出角色
-npx project-agent role export <role-id> > role.yaml
+npx agent-team role export <role-id> > role.yaml
 
 # 导入角色
-npx project-agent role import < role.yaml
+npx agent-team role import < role.yaml
 ```
 
 ## 最佳实践

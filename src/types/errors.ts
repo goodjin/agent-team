@@ -524,7 +524,7 @@ export const ERROR_MESSAGES: Record<ErrorCode, Omit<UserFriendlyError, 'code' | 
       '如果问题持续，请提交 Issue',
       '查看日志获取更多详情',
     ],
-    documentation: 'https://github.com/example/project-agent/issues',
+    documentation: 'https://github.com/example/agent-team/issues',
   },
   [ErrorCode.UNKNOWN_ERROR]: {
     title: '未知错误',

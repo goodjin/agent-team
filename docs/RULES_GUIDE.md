@@ -149,7 +149,7 @@ exceptions:
 ### 使用规则管理器
 
 ```typescript
-import { getRuleManager } from 'project-agent';
+import { getRuleManager } from 'agent-team';
 
 const manager = getRuleManager();
 
@@ -169,7 +169,7 @@ const sortedRules = manager.getRulesByPriority();
 ### 使用规则注入器
 
 ```typescript
-import { createRuleInjector } from 'project-agent';
+import { createRuleInjector } from 'agent-team';
 
 const injector = createRuleInjector();
 
@@ -186,7 +186,7 @@ console.log(result.injectedRules);
 ### 自定义规则
 
 ```typescript
-import { getRuleManager } from 'project-agent';
+import { getRuleManager } from 'agent-team';
 
 const manager = getRuleManager();
 
@@ -214,28 +214,28 @@ await manager.createRule({
 
 ```bash
 # 查看所有规则
-npx project-agent rule list
+npx agent-team rule list
 
 # 查看规则详情
-npx project-agent rule show <rule-id>
+npx agent-team rule show <rule-id>
 
 # 启用规则
-npx project-agent rule enable <rule-id>
+npx agent-team rule enable <rule-id>
 
 # 禁用规则
-npx project-agent rule disable <rule-id>
+npx agent-team rule disable <rule-id>
 
 # 创建自定义规则
-npx project-agent rule create <rule-id>
+npx agent-team rule create <rule-id>
 
 # 编辑规则
-npx project-agent rule edit <rule-id>
+npx agent-team rule edit <rule-id>
 
 # 删除规则（仅限自定义规则）
-npx project-agent rule delete <rule-id>
+npx agent-team rule delete <rule-id>
 
 # 测试规则
-npx project-agent rule test <rule-id> --file <path>
+npx agent-team rule test <rule-id> --file <path>
 ```
 
 ## 规则优先级
@@ -243,7 +243,7 @@ npx project-agent rule test <rule-id> --file <path>
 规则按优先级从高到低执行：
 
 ```typescript
-import { getPriorityManager } from 'project-agent';
+import { getPriorityManager } from 'agent-team';
 
 const priorityManager = getPriorityManager();
 

@@ -29,6 +29,10 @@ export interface HybridModeOptions {
   autoConfirm?: boolean;
   /// 彩色输出
   colorOutput?: boolean;
+  /// 使用增强的UI（更好的格式化和可视化）
+  useEnhancedUI?: boolean;
+  /// 使用 Ink UI（基于 React 的现代化界面，类似 Claude Code）
+  useInkUI?: boolean;
 }
 
 /**
@@ -63,6 +67,7 @@ export class HybridModeManager {
       showProgress: this.options.showProgress,
       showLLMThought: this.options.showLLMThought,
       colorOutput: this.options.colorOutput,
+      useEnhancedUI: this.options.useEnhancedUI ?? false,
     });
 
     // 创建交互式执行器
@@ -263,6 +268,19 @@ export class HybridModeManager {
    * 启动交互式会话（支持自由输入）
    */
   async startInteractiveSession(): Promise<void> {
+    // 如果启用了 Ink UI，使用 Ink 界面
+    if (this.options.useInkUI) {
+      const { startInkChatUI } = await import('./ink-chat-ui.js');
+      startInkChatUI({
+        agent: this.agent,
+        onExit: () => {
+          this.cli.close();
+        },
+      });
+      return;
+    }
+
+    // 使用传统的 CLI 界面
     this.cli.enableChatUI({ inputPrompt: 'You: ' });
     this.cli.appendRoleOutput('system', 'Project Agent - AI Assistant\n');
     this.cli.appendRoleOutput('system', 'Type anything to ask or execute tasks.\n');

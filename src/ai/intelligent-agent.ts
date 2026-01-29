@@ -42,6 +42,25 @@ export interface AIAgentConfig {
   showThoughts?: boolean;
   autoConfirmTools?: boolean;
   output?: (text: string) => void;
+  showTokenUsage?: boolean; // 是否显示 token 使用统计
+}
+
+/**
+ * Token 使用统计
+ */
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  callCount: number; // LLM 调用次数
+}
+
+/**
+ * 聊天结果（包含 token 统计）
+ */
+export interface ChatResult {
+  response: string;
+  tokenUsage: TokenUsage;
 }
 
 /**
@@ -53,6 +72,12 @@ export class IntelligentAgent {
   private config: Required<AIAgentConfig>;
   private tools: Map<string, (params: any) => Promise<any>> = new Map();
   private output: (text: string) => void;
+  private tokenUsage: TokenUsage = {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    callCount: 0,
+  };
 
   constructor(agent: ProjectAgent, config: AIAgentConfig = {}) {
     this.agent = agent;
@@ -62,6 +87,7 @@ export class IntelligentAgent {
       maxToolIterations: 10,
       showThoughts: false,
       autoConfirmTools: true,
+      showTokenUsage: false,
       ...config,
       output,
     };
@@ -113,6 +139,14 @@ export class IntelligentAgent {
    * 聊天 - 主要入口
    */
   async chat(userMessage: string): Promise<string> {
+    // 重置本次对话的 token 统计
+    const sessionTokenUsage: TokenUsage = {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      callCount: 0,
+    };
+
     // 添加用户消息到历史
     this.history.push({
       role: 'user',
@@ -144,6 +178,20 @@ export class IntelligentAgent {
 
       if (!llmResponse) {
         break;
+      }
+
+      // 收集 token 使用情况
+      if (llmResponse.usage) {
+        sessionTokenUsage.promptTokens += llmResponse.usage.promptTokens || 0;
+        sessionTokenUsage.completionTokens += llmResponse.usage.completionTokens || 0;
+        sessionTokenUsage.totalTokens += llmResponse.usage.totalTokens || 0;
+        sessionTokenUsage.callCount += 1;
+
+        // 累加到总统计
+        this.tokenUsage.promptTokens += llmResponse.usage.promptTokens || 0;
+        this.tokenUsage.completionTokens += llmResponse.usage.completionTokens || 0;
+        this.tokenUsage.totalTokens += llmResponse.usage.totalTokens || 0;
+        this.tokenUsage.callCount += 1;
       }
 
       // 解析响应
@@ -196,6 +244,19 @@ export class IntelligentAgent {
         const finalLLMResponse = await this.callLLM(messages);
         if (finalLLMResponse) {
           finalResponse = finalLLMResponse.content;
+          
+          // 收集最后一次调用的 token
+          if (finalLLMResponse.usage) {
+            sessionTokenUsage.promptTokens += finalLLMResponse.usage.promptTokens || 0;
+            sessionTokenUsage.completionTokens += finalLLMResponse.usage.completionTokens || 0;
+            sessionTokenUsage.totalTokens += finalLLMResponse.usage.totalTokens || 0;
+            sessionTokenUsage.callCount += 1;
+
+            this.tokenUsage.promptTokens += finalLLMResponse.usage.promptTokens || 0;
+            this.tokenUsage.completionTokens += finalLLMResponse.usage.completionTokens || 0;
+            this.tokenUsage.totalTokens += finalLLMResponse.usage.totalTokens || 0;
+            this.tokenUsage.callCount += 1;
+          }
         }
         break;
       }
@@ -207,6 +268,16 @@ export class IntelligentAgent {
       content: finalResponse,
       timestamp: Date.now(),
     });
+
+    // 通过 output 回调输出最终响应
+    if (finalResponse) {
+      this.emitOutput(finalResponse);
+    }
+
+    // 显示 token 使用统计（如果启用）
+    if (this.config.showTokenUsage && sessionTokenUsage.callCount > 0) {
+      this.emitTokenUsage(sessionTokenUsage, '本次对话');
+    }
 
     return finalResponse;
   }
@@ -334,6 +405,7 @@ read_file
       
       logger.debug('LLM 响应', { 
         contentLength: response.content?.length || 0,
+        tokenUsage: response.usage,
       });
       
       return response;
@@ -533,6 +605,37 @@ read_file
   }
 
   /**
+   * 显示 token 使用统计
+   */
+  private emitTokenUsage(usage: TokenUsage, label: string = ''): void {
+    const labelText = label ? `${label} ` : '';
+    this.emitOutput(`\n📊 ${labelText}Token 使用统计:\n`);
+    this.emitOutput(`   输入 tokens: ${usage.promptTokens.toLocaleString()}\n`);
+    this.emitOutput(`   输出 tokens: ${usage.completionTokens.toLocaleString()}\n`);
+    this.emitOutput(`   总计 tokens: ${usage.totalTokens.toLocaleString()}\n`);
+    this.emitOutput(`   LLM 调用次数: ${usage.callCount}\n`);
+  }
+
+  /**
+   * 获取 token 使用统计
+   */
+  getTokenUsage(): TokenUsage {
+    return { ...this.tokenUsage };
+  }
+
+  /**
+   * 重置 token 使用统计
+   */
+  resetTokenUsage(): void {
+    this.tokenUsage = {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      callCount: 0,
+    };
+  }
+
+  /**
    * 清除历史
    */
   clearHistory(): void {
@@ -584,6 +687,30 @@ read_file
     }
 
     return await this.chat(message);
+  }
+
+  /**
+   * 聊天并返回完整结果（包含 token 统计）
+   */
+  async chatWithStats(userMessage: string): Promise<ChatResult> {
+    // 保存当前统计
+    const beforeUsage = { ...this.tokenUsage };
+    
+    // 执行聊天
+    const response = await this.chat(userMessage);
+    
+    // 计算本次对话的 token 使用
+    const sessionUsage: TokenUsage = {
+      promptTokens: this.tokenUsage.promptTokens - beforeUsage.promptTokens,
+      completionTokens: this.tokenUsage.completionTokens - beforeUsage.completionTokens,
+      totalTokens: this.tokenUsage.totalTokens - beforeUsage.totalTokens,
+      callCount: this.tokenUsage.callCount - beforeUsage.callCount,
+    };
+    
+    return {
+      response,
+      tokenUsage: sessionUsage,
+    };
   }
 }
 

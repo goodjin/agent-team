@@ -1,6 +1,7 @@
 import readline from 'readline';
 import type { AgentEvent, AgentEventData } from '../types/index.js';
 import { ChatUI, type ChatUIOptions } from './chat-ui.js';
+import { EnhancedChatUI, type EnhancedChatUIOptions } from './enhanced-chat-ui.js';
 
 /**
  * 交互模式配置
@@ -10,6 +11,7 @@ export interface InteractiveOptions {
   showLLMThought?: boolean;
   autoConfirm?: boolean;
   colorOutput?: boolean;
+  useEnhancedUI?: boolean; // 是否使用增强的UI
 }
 
 /**
@@ -32,6 +34,7 @@ export class InteractiveCLI {
   private currentProgress: ProgressInfo | null = null;
   private eventHandlers: Map<string, (data: AgentEventData) => void> = new Map();
   private chatUI: ChatUI | null = null;
+  private enhancedChatUI: EnhancedChatUI | null = null;
 
   constructor(options: InteractiveOptions = {}) {
     this.options = {
@@ -39,6 +42,7 @@ export class InteractiveCLI {
       showLLMThought: false,
       autoConfirm: false,
       colorOutput: true,
+      useEnhancedUI: false,
       ...options,
     };
 
@@ -52,6 +56,11 @@ export class InteractiveCLI {
    * 询问用户
    */
   async question(prompt: string): Promise<string> {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      const answer = await this.enhancedChatUI.readLine(prompt);
+      return answer.trim();
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       const answer = await this.chatUI.readLine(prompt);
       return answer.trim();
@@ -142,6 +151,11 @@ export class InteractiveCLI {
    * 显示普通日志
    */
   log(message: string): void {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      this.enhancedChatUI.appendSystem(message + '\n');
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       this.chatUI.appendSystem(message + '\n');
       return;
@@ -153,6 +167,11 @@ export class InteractiveCLI {
    * 显示成功信息
    */
   success(message: string): void {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      this.enhancedChatUI.appendSystem(`✓ ${message}\n`);
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       this.chatUI.appendSystem(`✓ ${message}\n`);
       return;
@@ -164,6 +183,11 @@ export class InteractiveCLI {
    * 显示错误信息
    */
   error(message: string): void {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      this.enhancedChatUI.appendSystem(`✗ ${message}\n`);
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       this.chatUI.appendSystem(`✗ ${message}\n`);
       return;
@@ -175,6 +199,11 @@ export class InteractiveCLI {
    * 显示警告信息
    */
   warn(message: string): void {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      this.enhancedChatUI.appendSystem(`! ${message}\n`);
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       this.chatUI.appendSystem(`! ${message}\n`);
       return;
@@ -186,6 +215,11 @@ export class InteractiveCLI {
    * 显示信息
    */
   info(message: string): void {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      this.enhancedChatUI.appendSystem(`i ${message}\n`);
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       this.chatUI.appendSystem(`i ${message}\n`);
       return;
@@ -223,6 +257,12 @@ export class InteractiveCLI {
    */
   showProgress(current: number, total: number, message: string): void {
     if (!this.options.showProgress) return;
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      const percentage = Math.round((current / total) * 100);
+      this.enhancedChatUI.appendSystem(`[progress ${percentage}%] ${message}\n`);
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       const percentage = Math.round((current / total) * 100);
       this.chatUI.appendSystem(`[progress ${percentage}%] ${message}\n`);
@@ -327,6 +367,11 @@ export class InteractiveCLI {
    * 清屏
    */
   clear(): void {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      this.enhancedChatUI.clearOutput();
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       this.chatUI.clearOutput();
       return;
@@ -369,6 +414,11 @@ export class InteractiveCLI {
    * 关闭 CLI
    */
   close(): void {
+    if (this.enhancedChatUI) {
+      this.enhancedChatUI.close();
+      this.enhancedChatUI = null;
+    }
+    
     if (this.chatUI) {
       this.chatUI.close();
       this.chatUI = null;
@@ -380,11 +430,27 @@ export class InteractiveCLI {
     if (!process.stdout.isTTY || !process.stdin.isTTY) {
       return;
     }
-    this.chatUI = new ChatUI(options);
-    this.chatUI.start();
+    
+    if (this.options.useEnhancedUI) {
+      this.enhancedChatUI = new EnhancedChatUI({
+        inputPrompt: options.inputPrompt,
+        maxOutputLines: options.maxOutputLines,
+        showTimestamps: true,
+        colorizeRoles: true,
+      });
+      this.enhancedChatUI.start();
+    } else {
+      this.chatUI = new ChatUI(options);
+      this.chatUI.start();
+    }
   }
 
   appendRoleOutput(role: string, message: string): void {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      this.enhancedChatUI.appendRole(role, message);
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       this.chatUI.appendRole(role, message);
       return;
@@ -393,6 +459,11 @@ export class InteractiveCLI {
   }
 
   async streamRoleOutput(role: string, message: string): Promise<void> {
+    if (this.enhancedChatUI && this.enhancedChatUI.isActive()) {
+      await this.enhancedChatUI.streamRole(role, message);
+      return;
+    }
+    
     if (this.chatUI && this.chatUI.isActive()) {
       await this.chatUI.streamRole(role, message);
       return;

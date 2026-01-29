@@ -15,7 +15,7 @@ AI Agent 是 Project Agent 的核心功能，类似于 Claude Code，可以：
 ## 快速开始
 
 ```typescript
-import { ProjectAgent, createIntelligentAgent } from 'project-agent';
+import { ProjectAgent, createIntelligentAgent } from 'agent-team';
 
 const agent = new ProjectAgent({
   projectName: 'my-project',
@@ -137,7 +137,7 @@ console.log(code);
 
 ```bash
 # 启动交互式会话
-npx project-agent chat
+npx agent-team chat
 ```
 
 在交互式会话中，您可以：

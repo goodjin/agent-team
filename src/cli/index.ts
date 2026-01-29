@@ -290,7 +290,7 @@ Agent Team CLI 命令
   npx agent-team config show    # 显示当前配置
   npx agent-team chat          # 启动对话
 
-详细文档请访问: https://github.com/project-agent/docs
+详细文档请访问: https://github.com/agent-team/docs
 `);
 }
 

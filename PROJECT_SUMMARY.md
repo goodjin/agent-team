@@ -62,12 +62,12 @@
 ### 📁 项目结构
 
 ```
-project-agent/
+agent-team/
 ├── src/
 │   ├── types/               # 类型定义
 │   │   └── index.ts
 │   ├── core/                # 核心系统
-│   │   ├── project-agent.ts # 主 Agent 类
+│   │   ├── agent-team.ts # 主 Agent 类
 │   │   └── task-manager.ts  # 任务管理器
 │   ├── roles/               # 角色定义
 │   │   ├── base.ts          # 基础角色类
@@ -236,7 +236,7 @@ DEEPSEEK_API_KEY=xxxxx
 ### 基本使用
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 
 const agent = new ProjectAgent(
   {
@@ -290,7 +290,7 @@ const result = await agent.developFeature({
 ### 自动模式（批处理）
 
 ```typescript
-import { ProjectAgent } from 'project-agent';
+import { ProjectAgent } from 'agent-team';
 
 const agent = new ProjectAgent(config, { llm: './llm.config.json' });
 await agent.loadConfig();
@@ -305,7 +305,7 @@ await agent.developFeature({
 ### 交互式模式（逐步确认）
 
 ```typescript
-import { createHybridModeManager, ExecutionMode } from 'project-agent';
+import { createHybridModeManager, ExecutionMode } from 'agent-team';
 
 const hybrid = createHybridModeManager(agent, {
   mode: ExecutionMode.INTERACTIVE, // 交互式
@@ -367,7 +367,7 @@ npm run interactive:session
 
 5. **开始使用**
    ```typescript
-   import { ProjectAgent } from 'project-agent';
+   import { ProjectAgent } from 'agent-team';
 
    const agent = new ProjectAgent(config, {
      prompts: './prompts',
