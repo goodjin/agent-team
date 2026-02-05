@@ -2,6 +2,9 @@ export { DashboardUI, type AgentStatus, type TaskStatus, type CognitiveLoad, typ
 export { AgentManager, type AgentConfig } from './agent-manager-ui.js';
 export { TaskManager, type TaskConfig } from './task-manager-ui.js';
 export { CollaborationController, type ControllerConfig, type CollaborationMode } from './controller.js';
+export { ResultsUI, type ResultsUIConfig, type FileTreeNode, type PreviewResult } from './results-ui.js';
+export { FileTree, type FileTreeOptions, type FileTreeRenderOptions } from './file-tree.js';
+export { FilePreview, type PreviewConfig, type ImagePreviewOptions, type CodePreviewOptions } from './file-preview.js';
 
 import { CollaborationController } from './controller.js';
 import { ProjectAgent } from '../core/project-agent.js';

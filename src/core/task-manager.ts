@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import { EventEmitter } from 'eventemitter3';
+import path from 'path';
 import type {
   Task,
   TaskStatus,
@@ -14,6 +15,7 @@ import type {
   TaskInput,
   TaskWorkDirConfig,
 } from '../types/index.js';
+import type { PersistedTask } from '../types/persistence.js';
 import { RoleFactory } from '../roles/index.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
 import { LLMServiceFactory } from '../services/llm.service.js';
@@ -28,6 +30,8 @@ import {
 } from '../types/errors.js';
 import { ErrorDisplay } from '../utils/error-display.js';
 import { WorkDirManager } from './work-dir-manager.js';
+import { TaskPersistence } from './task-persistence.js';
+import { ProgressTracker } from './progress-tracker.js';
 
 /**
  * 任务管理器
@@ -41,6 +45,8 @@ export class TaskManager extends EventEmitter {
   private executingTasks: Set<string> = new Set();
   private errorDisplay: ErrorDisplay;
   private workDirManager: WorkDirManager;
+  private persistence: TaskPersistence;
+  private progressTracker: ProgressTracker;
 
   constructor(projectConfig: ProjectConfig, toolRegistry: ToolRegistry) {
     super();
@@ -55,6 +61,110 @@ export class TaskManager extends EventEmitter {
       showSuggestions: true,
       colorOutput: process.stdout.isTTY,
     });
+
+    const dataDir = path.resolve(process.cwd(), 'data');
+    this.persistence = new TaskPersistence({
+      storagePath: path.join(dataDir, 'tasks.json'),
+      backupPath: path.join(dataDir, 'backups'),
+      autoSaveIntervalMs: 30000,
+      maxBackupCount: 5,
+    });
+    this.progressTracker = new ProgressTracker();
+
+    this.persistence.setTaskGetter(() => this.getAllTasks().map(t => this.toPersistedTask(t)));
+    this.persistence.startAutoSave();
+
+    this.restoreTasks();
+  }
+
+  private async restoreTasks(): Promise<void> {
+    const persistedTasks = await this.persistence.loadTasks();
+    for (const persisted of persistedTasks) {
+      const task = this.fromPersistedTask(persisted);
+      if (!task.metadata) {
+        task.metadata = {};
+      }
+      task.metadata.isRecovered = true;
+      task.metadata.restartCount = (task.metadata.restartCount || 0) + 1;
+      task.metadata.recoveredFrom = persisted.id;
+      this.tasks.set(task.id, task);
+
+      await this.progressTracker.checkpoint(
+        task.id,
+        'recovered',
+        `Task recovered from previous session`,
+        persisted.progress?.percentage || 0
+      );
+    }
+
+    if (persistedTasks.length > 0) {
+      console.log(`[TaskManager] Restored ${persistedTasks.length} tasks from persistence`);
+    }
+  }
+
+  private toPersistedTask(task: Task): PersistedTask {
+    const metadata = task.metadata || {};
+    return {
+      id: task.id,
+      type: task.type,
+      title: task.title,
+      description: task.description,
+      status: task.status,
+      priority: task.priority,
+      assignedRole: task.assignedRole,
+      ownerRole: task.ownerRole,
+      dependencies: task.dependencies || [],
+      input: task.input || {},
+      output: task.output,
+      constraints: task.constraints,
+      metadata: {
+        createdAt: task.createdAt,
+        updatedAt: task.updatedAt,
+        restartCount: (metadata.restartCount as number) || 0,
+        isRecovered: (metadata.isRecovered as boolean) || false,
+        lastExecutedAt: metadata.lastExecutedAt,
+        completedAt: metadata.completedAt,
+        recoveredFrom: metadata.recoveredFrom,
+      },
+      progress: task.progress || {
+        completedSteps: [],
+        percentage: 0,
+      },
+      executionRecords: task.executionRecords || [],
+      retryHistory: task.retryHistory || [],
+    };
+  }
+
+  private fromPersistedTask(persisted: PersistedTask): Task {
+    return {
+      id: persisted.id,
+      type: persisted.type as TaskType,
+      title: persisted.title,
+      description: persisted.description,
+      status: persisted.status,
+      priority: persisted.priority,
+      assignedRole: persisted.assignedRole as Task['assignedRole'],
+      ownerRole: persisted.ownerRole as Task['ownerRole'],
+      dependencies: persisted.dependencies || [],
+      input: persisted.input || {},
+      output: persisted.output,
+      constraints: persisted.constraints,
+      metadata: persisted.metadata || {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        restartCount: 0,
+        isRecovered: false,
+      },
+      progress: persisted.progress || {
+        completedSteps: [],
+        percentage: 0,
+      },
+      executionRecords: (persisted.executionRecords || []) as TaskExecutionRecord[],
+      retryHistory: persisted.retryHistory || [],
+      messages: [],
+      createdAt: persisted.metadata?.createdAt || new Date(),
+      updatedAt: persisted.metadata?.updatedAt || new Date(),
+    };
   }
 
   /**
@@ -85,7 +195,16 @@ export class TaskManager extends EventEmitter {
       ownerRole: params.ownerRole,
       input: params.input || {},
       constraints: params.constraints,
-      metadata: {},
+      metadata: {
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        restartCount: 0,
+        isRecovered: false,
+      },
+      progress: {
+        completedSteps: [],
+        percentage: 0,
+      },
       createdAt: new Date(),
       updatedAt: new Date(),
       subtasks: params.subtasks?.map((s: any) => ({
@@ -101,6 +220,7 @@ export class TaskManager extends EventEmitter {
         timestamp: new Date(),
       }] : [],
       executionRecords: [],
+      retryHistory: [],
     };
 
     if (params.input?.workDir) {
@@ -117,6 +237,15 @@ export class TaskManager extends EventEmitter {
     }
 
     this.tasks.set(task.id, task);
+
+    this.persistence.saveTask(this.toPersistedTask(task));
+
+    this.progressTracker.checkpoint(
+      task.id,
+      'created',
+      `Task "${task.title}" created`,
+      0
+    );
 
     this.emit('task:created', {
       event: 'task:created',
@@ -211,35 +340,55 @@ export class TaskManager extends EventEmitter {
   /**
    * 更新任务状态
    */
-  updateTaskStatus(id: string, status: TaskStatus): void {
+  async updateTaskStatus(id: string, status: TaskStatus): Promise<void> {
     const task = this.tasks.get(id);
     if (!task) {
       throw new Error(`Task not found: ${id}`);
     }
 
+    const previousStatus = task.status;
     task.status = status;
     task.updatedAt = new Date();
 
+    if (!task.metadata) {
+      task.metadata = {};
+    }
+
     if (status === 'in-progress' && !task.startedAt) {
       task.startedAt = new Date();
+      task.metadata.lastExecutedAt = new Date();
     }
 
     if (status === 'completed' || status === 'failed') {
       task.completedAt = new Date();
+      task.metadata.completedAt = new Date();
       this.executingTasks.delete(id);
     }
+
+    if (status === 'completed') {
+      task.progress = task.progress || { completedSteps: [], percentage: 0 };
+      task.progress.percentage = 100;
+      this.progressTracker.checkpoint(
+        id,
+        'completed',
+        `Task completed`,
+        100
+      );
+    }
+
+    await this.persistence.saveTask(this.toPersistedTask(task));
 
     this.emit(`task:${status}`, {
       event: `task:${status}`,
       timestamp: new Date(),
-      data: { task },
+      data: { task, previousStatus, newStatus: status },
     } as AgentEventData);
   }
 
   /**
    * 设置任务结果
    */
-  setTaskResult(id: string, result: ToolResult): void {
+  async setTaskResult(id: string, result: ToolResult): Promise<void> {
     const task = this.tasks.get(id);
     if (!task) {
       throw new Error(`Task not found: ${id}`);
@@ -247,6 +396,8 @@ export class TaskManager extends EventEmitter {
 
     task.result = result;
     task.updatedAt = new Date();
+
+    await this.persistence.saveTask(this.toPersistedTask(task));
   }
 
   /**
@@ -259,23 +410,21 @@ export class TaskManager extends EventEmitter {
       title: task?.title,
       assignedRole: task?.assignedRole
     });
-    
+
     if (!task) {
       console.error('[TaskManager.executeTask] 任务不存在:', taskId);
       throw new Error(`Task not found: ${taskId}`);
     }
 
-    // 检查任务是否已经在执行
     if (this.executingTasks.has(taskId)) {
       throw new Error(`Task is already executing: ${taskId}`);
     }
 
-    // 检查依赖是否完成
     if (task.dependencies && task.dependencies.length > 0) {
       for (const depId of task.dependencies) {
         const depTask = this.tasks.get(depId);
         if (!depTask || depTask.status !== 'completed') {
-          this.updateTaskStatus(taskId, 'blocked');
+          await this.updateTaskStatus(taskId, 'blocked');
           return {
             success: false,
             error: `Task dependencies not satisfied: ${depId}`,
@@ -284,15 +433,12 @@ export class TaskManager extends EventEmitter {
       }
     }
 
-    // 更新任务状态为执行中
-    this.updateTaskStatus(taskId, 'in-progress');
+    await this.updateTaskStatus(taskId, 'in-progress');
     this.executingTasks.add(taskId);
 
     try {
-      // 构建执行上下文
       const context = await this.buildContext(task);
 
-      // 获取角色
       const role = this.getRoleForTask(task);
       if (!role) {
         throw new ErrorWithCode(
@@ -302,11 +448,9 @@ export class TaskManager extends EventEmitter {
         );
       }
 
-      // 记录执行开始
       const executionStartTime = new Date();
       const roleType = task.assignedRole || 'developer';
-      
-      // 获取使用的模型信息
+
       const manager = getLLMConfigManager();
       const roleLLMConfig = manager.getRoleLLMConfig(roleType);
       const modelInfo = roleLLMConfig ? {
@@ -314,17 +458,13 @@ export class TaskManager extends EventEmitter {
         provider: roleLLMConfig.provider,
       } : undefined;
 
-      // 执行任务
       const result = await role.execute(task, context);
 
-      // 记录执行结束
       const executionEndTime = new Date();
       const duration = executionEndTime.getTime() - executionStartTime.getTime();
 
-      // 从result.metadata中提取tokens信息
       const tokensUsed = result.metadata?.tokensUsed || result.metadata?.usage;
 
-      // 添加执行记录
       this.addExecutionRecord(taskId, {
         role: roleType,
         action: `执行任务: ${task.title}`,
@@ -341,44 +481,35 @@ export class TaskManager extends EventEmitter {
         provider: modelInfo?.provider || result.metadata?.provider,
       });
 
-      // 设置结果
       this.setTaskResult(taskId, result);
 
-      // 更新状态
-      this.updateTaskStatus(taskId, result.success ? 'completed' : 'failed');
+      await this.updateTaskStatus(taskId, result.success ? 'completed' : 'failed');
 
-      // 执行子任务
       if (result.success && task.subtasks && task.subtasks.length > 0) {
         const subtaskResults = [];
         for (const subtask of task.subtasks) {
-          // 添加子任务到任务列表
           this.tasks.set(subtask.id, subtask);
-          // 执行子任务
           const subResult = await this.executeTask(subtask.id);
           subtaskResults.push(subResult);
         }
 
-        // 如果有子任务失败，主任务也标记为失败
         if (subtaskResults.some(r => !r.success)) {
-          this.updateTaskStatus(taskId, 'failed');
+          await this.updateTaskStatus(taskId, 'failed');
         }
       }
 
-      // 清理结果，确保没有 undefined
       const cleanResult: any = {
         success: result.success,
         data: result.data,
         metadata: result.metadata,
       };
-      
-      // 只有在有错误时才添加 error 字段
+
       if (result.error) {
         cleanResult.error = result.error;
       }
 
       return cleanResult as ToolResult;
     } catch (error) {
-      // 详细的错误日志
       console.error('='.repeat(60));
       console.error('❌ 任务执行异常');
       console.error('='.repeat(60));
@@ -394,16 +525,13 @@ export class TaskManager extends EventEmitter {
       }
       console.error('='.repeat(60));
 
-      // 转换为用户友好错误
       const userError = getUserFriendlyError(error as Error, {
         taskId,
         taskTitle: task.title,
       });
 
-      // 输出友好错误
       this.errorDisplay.display(userError);
 
-      // 记录错误结果
       const errorResult: ToolResult = {
         success: false,
         error: userError.message,
@@ -415,7 +543,7 @@ export class TaskManager extends EventEmitter {
       };
 
       this.setTaskResult(taskId, errorResult);
-      this.updateTaskStatus(taskId, 'failed');
+      await this.updateTaskStatus(taskId, 'failed');
 
       this.emit('error', {
         event: 'error',
@@ -518,7 +646,7 @@ export class TaskManager extends EventEmitter {
   /**
    * 删除任务
    */
-  deleteTask(id: string): void {
+  async deleteTask(id: string): Promise<void> {
     const task = this.tasks.get(id);
     if (!task) {
       throw new Error(`Task not found: ${id}`);
@@ -530,6 +658,8 @@ export class TaskManager extends EventEmitter {
 
     this.tasks.delete(id);
 
+    await this.persistence.deleteTask(id);
+
     this.emit('task:deleted', {
       event: 'task:deleted',
       timestamp: new Date(),
@@ -540,12 +670,14 @@ export class TaskManager extends EventEmitter {
   /**
    * 清空所有任务
    */
-  clear(): void {
+  async clear(): Promise<void> {
     if (this.executingTasks.size > 0) {
       throw new Error('Cannot clear tasks while some are executing');
     }
 
     this.tasks.clear();
+
+    await this.persistence.clear();
   }
 
   /**

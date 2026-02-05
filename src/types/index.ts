@@ -7,6 +7,9 @@ import { z } from 'zod';
 // 重新导出错误类型
 export * from './errors.js';
 
+// 重新导出输出类型
+export * from './output.js';
+
 // LLM 提供商类型
 export type LLMProvider = 'anthropic' | 'openai' | 'ollama' | 'custom';
 
@@ -123,6 +126,23 @@ export interface Task {
   messages?: TaskMessage[]; // 对话历史
   executionRecords?: TaskExecutionRecord[]; // 执行记录
   summary?: string; // 任务总结
+  // 持久化相关字段
+  progress?: {
+    currentStep?: string;
+    completedSteps: string[];
+    percentage: number;
+    message?: string;
+    lastCheckpointAt?: Date;
+  };
+  retryHistory?: Array<{
+    attemptNumber: number;
+    failedAt: Date;
+    error: string;
+    errorStack?: string;
+    delayMs: number;
+    retriedAt?: Date;
+    retriedBy?: string;
+  }>;
 }
 
 // 任务约束
@@ -390,6 +410,13 @@ export interface TokenStats {
   totalTokens: number;
 }
 
+// Token 使用统计
+export interface TokenUsage {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
 // 提供商信息
 export interface ProviderInfo {
   name: string;
@@ -645,12 +672,20 @@ export interface TaskWorkDirConfig {
   preserve?: boolean;
 }
 
+export interface RetryConfig {
+  maxRetries: number;
+  backoffMs: number;
+  retryableErrors?: string[];
+}
+
 export interface TaskInput {
   variables?: Record<string, any>;
   stepConfig?: Record<string, any>;
   stepOutputs?: Record<string, any>;
   workDir?: TaskWorkDirConfig;
   workDirState?: import('./work-dir.js').WorkDirState;
+  autoExecute?: boolean;
+  retryConfig?: RetryConfig;
   [key: string]: any;
 }
 
