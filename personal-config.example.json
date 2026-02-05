@@ -1,0 +1,104 @@
+{
+  "personalProfile": {
+    "name": "Your Name",
+    "expertise": [
+      "TypeScript",
+      "JavaScript", 
+      "Node.js",
+      "React",
+      "System Design",
+      "Architecture"
+    ],
+    "codingStyle": "clean-code-enthusiast",
+    "preferences": {
+      "architecture": "modular-microservices",
+      "testing": "TDD-with-integration",
+      "documentation": "inline-docs-first",
+      "errorHandling": "graceful-degradation",
+      "performance": "optimize-when-needed",
+      "security": "security-by-design"
+    },
+    "projectHistory": [
+      {
+        "type": "web-application",
+        "techStack": ["React", "Node.js", "PostgreSQL"],
+        "patterns": ["repository-pattern", "dependency-injection", "microservices"],
+        "scale": "medium"
+      }
+    ],
+    "learningStyle": "hands-on-experimentation",
+    "problemSolving": "systematic-with-prototyping"
+  },
+  "cognitivePreferences": {
+    "complexityThreshold": "high",
+    "decisionStyle": "analytical-with-prototyping",
+    "learningPattern": "hands-on-experimentation",
+    "focusHours": [9, 10, 11, 14, 15, 16, 21, 22, 23],
+    "breakDuration": 15,
+    "maxContinuousWork": 120,
+    "cognitiveLoadLimit": 0.8
+  },
+  "aiCollaborationConfig": {
+    "defaultModel": "claude-3-opus",
+    "codingModel": "deepseek-coder",
+    "fastModel": "claude-3-haiku",
+    "longContextModel": "kimi-128k",
+    "contextWindow": "maximum",
+    "explanationDepth": "detailed-with-alternatives",
+    "thinkingMode": "transparent",
+    "creativityLevel": "high",
+    "conservatismLevel": "medium"
+  },
+  "enhancementSettings": {
+    "cognitiveShield": {
+      "enabled": true,
+      "protectFocusHours": true,
+      "adaptiveScheduling": true,
+      "loadBalancing": true
+    },
+    "complexityDecomposer": {
+      "enabled": true,
+      "autoDecompose": true,
+      "minComplexityForDecomposition": 5,
+      "maxSubtasks": 10
+    },
+    "potentialUnlocker": {
+      "enabled": true,
+      "defaultMode": "multi-dimensional",
+      "complexityThresholds": {
+        "low": 3,
+        "medium": 5,
+        "high": 8
+      },
+      "modeMapping": {
+        "architecture": "systems",
+        "development": "multi-dimensional",
+        "analysis": "first-principles",
+        "review": "adversarial",
+        "refactoring": "recursive"
+      }
+    }
+  },
+  "workflowPreferences": {
+    "parallelExecution": true,
+    "progressTracking": "detailed",
+    "failureHandling": "retry-with-backoff",
+    "resultValidation": "thorough",
+    "documentation": "comprehensive"
+  },
+  "qualityStandards": {
+    "codeCoverage": 0.8,
+    "documentationCoverage": 0.9,
+    "performanceBenchmarks": {
+      "responseTime": 200,
+      "throughput": 1000,
+      "availability": 0.999
+    },
+    "securityRequirements": [
+      "input-validation",
+      "output-encoding",
+      "authentication-required",
+      "authorization-checked"
+    ]
+  }
+}

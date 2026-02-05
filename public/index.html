@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Team - 智能团队管理系统</title>
+    <title>Agent Team - 智能体指挥中心</title>
     <link rel="stylesheet" href="/styles.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🤖</text></svg>">
 </head>
 <body>
     <div class="app-container">
@@ -12,12 +13,36 @@
         <aside class="sidebar">
             <div class="sidebar-header">
                 <h1>🤖 Agent Team</h1>
+                <div class="system-status" id="system-status">
+                    <span class="status-dot online"></span>
+                    <span class="status-text">系统在线</span>
+                </div>
+            </div>
+            
+            <!-- 快速统计 -->
+            <div class="quick-stats">
+                <div class="quick-stat" title="运行中智能体">
+                    <span class="qs-icon">🚀</span>
+                    <span class="qs-value" id="qs-agents">0</span>
+                    <span class="qs-label">智能体</span>
+                </div>
+                <div class="quick-stat" title="进行中任务">
+                    <span class="qs-icon">📋</span>
+                    <span class="qs-value" id="qs-tasks">0</span>
+                    <span class="qs-label">任务</span>
+                </div>
+                <div class="quick-stat" title="Token使用">
+                    <span class="qs-icon">💰</span>
+                    <span class="qs-value" id="qs-tokens">0</span>
+                    <span class="qs-label">Token</span>
+                </div>
             </div>
             
             <!-- 任务列表 -->
             <div class="task-section">
                 <div class="task-header">
-                    <span>📋 任务</span>
+                    <span>📋 待办任务</span>
+                    <button class="btn-icon" id="btn-refresh-tasks" title="刷新">🔄</button>
                 </div>
                 <div id="tasks-sidebar-list" class="tasks-sidebar-list"></div>
             </div>
@@ -29,145 +54,738 @@
                 </a>
                 <a href="#tasks" class="nav-item" data-page="tasks">
                     <span class="icon">📋</span>
-                    <span>任务管理</span>
+                    <span>任务中心</span>
                 </a>
-                <a href="#roles" class="nav-item" data-page="roles">
-                    <span class="icon">👥</span>
-                    <span>角色管理</span>
+                <a href="#agents" class="nav-item" data-page="agents">
+                    <span class="icon">🤖</span>
+                    <span>智能体</span>
+                </a>
+                <a href="#projects" class="nav-item" data-page="projects">
+                    <span class="icon">📁</span>
+                    <span>项目管理</span>
                 </a>
                 <a href="#workflows" class="nav-item" data-page="workflows">
                     <span class="icon">🔄</span>
                     <span>工作流</span>
                 </a>
-                <a href="#config" class="nav-item" data-page="config">
+                <a href="#reports" class="nav-item" data-page="reports">
+                    <span class="icon">📈</span>
+                    <span>分析报告</span>
+                </a>
+                <a href="#settings" class="nav-item" data-page="settings">
                     <span class="icon">⚙️</span>
-                    <span>配置</span>
+                    <span>系统设置</span>
                 </a>
             </nav>
+            
+            <!-- 底部 -->
+            <div class="sidebar-footer">
+                <button class="theme-toggle" id="theme-toggle" title="切换主题">
+                    <span class="theme-icon">🌙</span>
+                </button>
+                <span class="version">v1.0.0</span>
+            </div>
         </aside>
 
         <!-- 主内容区 -->
         <main class="main-content">
+            <!-- 顶部栏 -->
+            <header class="top-bar">
+                <div class="breadcrumb" id="breadcrumb">
+                    <span>首页</span>
+                    <span class="separator">/</span>
+                    <span class="current">仪表板</span>
+                </div>
+                <div class="top-actions">
+                    <div class="search-box">
+                        <input type="text" id="global-search" placeholder="搜索任务、智能体...">
+                        <span class="search-icon">🔍</span>
+                    </div>
+                    <button class="btn btn-primary" id="btn-quick-task">
+                        <span>➕</span> 快速创建
+                    </button>
+                    <button class="btn btn-secondary" id="btn-notifications" title="通知">
+                        <span>🔔</span>
+                        <span class="notification-badge" id="notification-count">0</span>
+                    </button>
+                </div>
+            </header>
+
             <!-- 仪表板页面 -->
             <div id="page-dashboard" class="page active">
-                <header class="page-header">
-                    <h2>📊 仪表板</h2>
-                </header>
-                <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-label">总任务数</div>
-                        <div class="stat-value" id="stat-total">0</div>
+                <div class="dashboard-header">
+                    <div>
+                        <h2>📊 仪表板</h2>
+                        <p class="subtitle">智能体指挥中心 - 系统概览</p>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-label">进行中</div>
-                        <div class="stat-value" id="stat-in-progress">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">已完成</div>
-                        <div class="stat-value" id="stat-completed">0</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="stat-label">失败</div>
-                        <div class="stat-value" id="stat-failed">0</div>
+                    <div class="dashboard-actions">
+                        <button class="btn btn-secondary" onclick="refreshDashboard()">
+                            🔄 刷新
+                        </button>
+                        <select id="dashboard-time-range" class="filter-select">
+                            <option value="today">今天</option>
+                            <option value="week" selected>本周</option>
+                            <option value="month">本月</option>
+                        </select>
                     </div>
                 </div>
-                <div class="recent-tasks">
-                    <h3>最近任务</h3>
-                    <div id="recent-tasks-list" class="task-list"></div>
+                
+                <!-- 核心指标卡片 -->
+                <div class="stats-grid">
+                    <div class="stat-card" onclick="switchToPage('tasks')" style="cursor: pointer;">
+                        <div class="stat-icon">📋</div>
+                        <div class="stat-content">
+                            <div class="stat-label">总任务数</div>
+                            <div class="stat-value" id="stat-total">0</div>
+                            <div class="stat-trend positive" id="stat-total-trend">+0%</div>
+                        </div>
+                    </div>
+                    <div class="stat-card highlight-blue" onclick="switchToPage('tasks', 'in-progress')" style="cursor: pointer;">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-content">
+                            <div class="stat-label">进行中</div>
+                            <div class="stat-value" id="stat-in-progress">0</div>
+                            <div class="stat-sub" id="stat-in-progress-agents">0 智能体处理中</div>
+                        </div>
+                    </div>
+                    <div class="stat-card highlight-green" onclick="switchToPage('tasks', 'completed')" style="cursor: pointer;">
+                        <div class="stat-icon">✅</div>
+                        <div class="stat-content">
+                            <div class="stat-label">已完成</div>
+                            <div class="stat-value" id="stat-completed">0</div>
+                            <div class="stat-trend positive" id="stat-completed-rate">完成率 0%</div>
+                        </div>
+                    </div>
+                    <div class="stat-card highlight-red" onclick="switchToPage('tasks', 'failed')" style="cursor: pointer;">
+                        <div class="stat-icon">❌</div>
+                        <div class="stat-content">
+                            <div class="stat-label">失败</div>
+                            <div class="stat-value" id="stat-failed">0</div>
+                            <div class="stat-sub">需要关注</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 智能体状态 -->
+                <div class="dashboard-section">
+                    <h3>🤖 智能体运行状态</h3>
+                    <div class="agents-overview" id="agents-overview">
+                        <div class="agent-summary">
+                            <div class="agent-stat running">
+                                <span class="agent-count" id="agent-running">0</span>
+                                <span class="agent-label">运行中</span>
+                            </div>
+                            <div class="agent-stat idle">
+                                <span class="agent-count" id="agent-idle">0</span>
+                                <span class="agent-label">空闲</span>
+                            </div>
+                            <div class="agent-stat error">
+                                <span class="agent-count" id="agent-error">0</span>
+                                <span class="agent-label">异常</span>
+                            </div>
+                        </div>
+                        <div class="agent-cards" id="agent-cards">
+                            <!-- 智能体卡片将通过JS动态添加 -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 任务进度和活动 -->
+                <div class="dashboard-grid">
+                    <!-- 任务进度 -->
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h4>📈 任务进度</h4>
+                        </div>
+                        <div class="card-body">
+                            <div class="progress-overview">
+                                <div class="progress-circle" id="progress-circle">
+                                    <svg viewBox="0 0 100 100">
+                                        <circle class="progress-bg" cx="50" cy="50" r="45"/>
+                                        <circle class="progress-fill" cx="50" cy="50" r="45" id="progress-fill"/>
+                                    </svg>
+                                    <div class="progress-text">
+                                        <span class="progress-value" id="progress-value">0%</span>
+                                        <span class="progress-label">完成率</span>
+                                    </div>
+                                </div>
+                                <div class="progress-details">
+                                    <div class="progress-item">
+                                        <span class="progress-dot completed"></span>
+                                        <span class="progress-name">已完成</span>
+                                        <span class="progress-count" id="prog-completed">0</span>
+                                    </div>
+                                    <div class="progress-item">
+                                        <span class="progress-dot in-progress"></span>
+                                        <span class="progress-name">进行中</span>
+                                        <span class="progress-count" id="prog-inprogress">0</span>
+                                    </div>
+                                    <div class="progress-item">
+                                        <span class="progress-dot pending"></span>
+                                        <span class="progress-name">待处理</span>
+                                        <span class="progress-count" id="prog-pending">0</span>
+                                    </div>
+                                    <div class="progress-item">
+                                        <span class="progress-dot failed"></span>
+                                        <span class="progress-name">失败</span>
+                                        <span class="progress-count" id="prog-failed">0</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 最近活动 -->
+                    <div class="dashboard-card">
+                        <div class="card-header">
+                            <h4>📰 最近活动</h4>
+                            <button class="btn-link" onclick="switchToPage('tasks')">查看全部 →</button>
+                        </div>
+                        <div class="card-body">
+                            <div class="activity-list" id="activity-list">
+                                <div class="activity-empty">暂无活动记录</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 快捷操作 -->
+                <div class="quick-actions">
+                    <h3>⚡ 快捷操作</h3>
+                    <div class="action-buttons">
+                        <button class="action-btn" onclick="showCreateTaskModal()">
+                            <span class="action-icon">📋</span>
+                            <span class="action-text">新建任务</span>
+                        </button>
+                        <button class="action-btn" onclick="switchToPage('agents')">
+                            <span class="action-icon">🤖</span>
+                            <span class="action-text">启动智能体</span>
+                        </button>
+                        <button class="action-btn" onclick="switchToPage('workflows')">
+                            <span class="action-icon">🔄</span>
+                            <span class="action-text">执行工作流</span>
+                        </button>
+                        <button class="action-btn" onclick="switchToPage('reports')">
+                            <span class="action-icon">📊</span>
+                            <span class="action-text">查看报告</span>
+                        </button>
+                    </div>
                 </div>
             </div>
 
-            <!-- 任务管理页面 -->
+            <!-- 任务中心页面 -->
             <div id="page-tasks" class="page">
-                <header class="page-header">
-                    <h2>📋 任务管理</h2>
-                </header>
+                <div class="page-header">
+                    <div>
+                        <h2>📋 任务中心</h2>
+                        <p class="subtitle">任务全生命周期管理</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="showCreateTaskModal()">
+                        ➕ 创建任务
+                    </button>
+                </div>
                 
                 <!-- 对话输入区 -->
                 <div class="chat-input-section">
+                    <div class="chat-input-header">
+                        <span>💬 智能对话</span>
+                        <span class="chat-hint">描述你的需求，系统自动理解并执行</span>
+                    </div>
                     <div class="chat-input-container">
-                        <textarea id="chat-input" class="chat-input" placeholder="输入你的需求或问题，系统会自动判断是否属于已有任务或创建新任务..."></textarea>
-                        <button class="btn btn-primary" id="btn-send-message">发送</button>
+                        <textarea id="chat-input" class="chat-input" placeholder="输入你的需求或问题，例如：&#10;- 创建一个用户登录功能&#10;- 帮我分析这段代码&#10;- 修复登录接口的bug"></textarea>
+                        <div class="chat-actions">
+                            <div class="chat-tools">
+                                <button class="btn-icon" title="附件">📎</button>
+                                <button class="btn-icon" title="代码">📝</button>
+                            </div>
+                            <button class="btn btn-primary" id="btn-send-message">
+                                <span>发送</span>
+                                <span class="btn-shortcut">Ctrl+Enter</span>
+                            </button>
+                        </div>
                     </div>
                 </div>
                 
                 <div class="tasks-container">
-                <div class="filters">
-                    <select id="filter-status" class="filter-select">
-                        <option value="">所有状态</option>
-                        <option value="pending">待处理</option>
-                        <option value="in-progress">进行中</option>
-                        <option value="completed">已完成</option>
-                        <option value="failed">失败</option>
-                        <option value="blocked">阻塞</option>
-                    </select>
-                    <select id="filter-role" class="filter-select">
-                        <option value="">所有角色</option>
-                    </select>
-                    <input type="text" id="filter-search" class="filter-input" placeholder="搜索任务...">
-                </div>
-                    <div id="tasks-list" class="task-list"></div>
+                    <div class="filters-bar">
+                        <div class="filter-group">
+                            <select id="filter-status" class="filter-select">
+                                <option value="">所有状态</option>
+                                <option value="pending">待处理</option>
+                                <option value="in-progress">进行中</option>
+                                <option value="completed">已完成</option>
+                                <option value="failed">失败</option>
+                                <option value="blocked">阻塞</option>
+                            </select>
+                            <select id="filter-role" class="filter-select">
+                                <option value="">所有角色</option>
+                            </select>
+                            <select id="filter-priority" class="filter-select">
+                                <option value="">所有优先级</option>
+                                <option value="low">低</option>
+                                <option value="medium">中</option>
+                                <option value="high">高</option>
+                                <option value="critical">紧急</option>
+                            </select>
+                            <input type="text" id="filter-search" class="filter-input" placeholder="搜索任务...">
+                        </div>
+                        <div class="view-toggle">
+                            <button class="view-btn active" data-view="list" title="列表视图">📋</button>
+                            <button class="view-btn" data-view="grid" title="卡片视图">▦</button>
+                        </div>
+                    </div>
+                    <div id="tasks-list" class="task-list view-list"></div>
                 </div>
             </div>
             
             <!-- 任务详情页面 -->
             <div id="page-task-detail" class="page">
                 <header class="page-header">
-                    <h2 id="task-detail-title">任务详情</h2>
-                    <button class="btn btn-secondary" id="btn-back-to-tasks">返回</button>
+                    <div>
+                        <h2 id="task-detail-title">任务详情</h2>
+                        <p class="subtitle" id="task-detail-id">ID: -</p>
+                    </div>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="switchToPage('tasks')">
+                            ← 返回任务列表
+                        </button>
+                        <button class="btn btn-primary" id="btn-execute-task" onclick="executeCurrentTask()">
+                            ▶ 执行任务
+                        </button>
+                    </div>
                 </header>
                 <div id="task-detail-content" class="task-detail-content">
                     <!-- 任务信息 -->
                     <div class="task-info-section">
-                        <h3>任务信息</h3>
+                        <div class="section-header">
+                            <h3>📋 任务信息</h3>
+                            <div class="task-actions-inline">
+                                <button class="btn btn-sm btn-secondary" onclick="editCurrentTask()">✏️ 编辑</button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteCurrentTask()">🗑️ 删除</button>
+                            </div>
+                        </div>
                         <div id="task-info"></div>
+                    </div>
+                    
+                    <!-- 进度追踪 -->
+                    <div class="task-progress-section">
+                        <h3>📊 进度追踪</h3>
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="task-progress-bar">
+                                <div class="progress-fill" id="task-progress-fill"></div>
+                            </div>
+                            <span class="progress-text" id="task-progress-text">0/0 步骤</span>
+                        </div>
+                        <div class="subtasks-list" id="subtasks-list"></div>
                     </div>
                     
                     <!-- 对话历史 -->
                     <div class="task-messages-section">
-                        <h3>对话历史</h3>
+                        <div class="section-header">
+                            <h3>💬 对话历史</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="expandAllMessages()">
+                                展开全部
+                            </button>
+                        </div>
                         <div id="task-messages" class="messages-list"></div>
+                        <div class="message-input">
+                            <textarea id="task-message-input" placeholder="输入消息..."></textarea>
+                            <button class="btn btn-primary" onclick="sendTaskMessage()">发送</button>
+                        </div>
                     </div>
                     
                     <!-- 执行记录 -->
                     <div class="task-execution-section">
-                        <h3>执行记录</h3>
+                        <h3>📝 执行记录</h3>
                         <div id="task-execution-records" class="execution-records-list"></div>
+                    </div>
+                    
+                    <!-- 工具调用 -->
+                    <div class="task-tools-section">
+                        <h3>🛠️ 工具调用记录</h3>
+                        <div id="task-tools" class="tools-list"></div>
                     </div>
                 </div>
             </div>
 
-            <!-- 角色管理页面 -->
-            <div id="page-roles" class="page">
+            <!-- 智能体管理页面 -->
+            <div id="page-agents" class="page">
+                <div class="page-header">
+                    <div>
+                        <h2>🤖 智能体管理</h2>
+                        <p class="subtitle">监控和管理所有运行中的智能体</p>
+                    </div>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="refreshAgents()">
+                            🔄 刷新
+                        </button>
+                        <button class="btn btn-primary" onclick="showCreateAgentModal()">
+                            ➕ 创建智能体
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 智能体统计 -->
+                <div class="agent-stats-bar">
+                    <div class="agent-stat-item">
+                        <span class="stat-num" id="agent-total">0</span>
+                        <span class="stat-name">总智能体</span>
+                    </div>
+                    <div class="agent-stat-item running">
+                        <span class="stat-num" id="agent-running-count">0</span>
+                        <span class="stat-name">运行中</span>
+                    </div>
+                    <div class="agent-stat-item idle">
+                        <span class="stat-num" id="agent-idle-count">0</span>
+                        <span class="stat-name">空闲</span>
+                    </div>
+                    <div class="agent-stat-item error">
+                        <span class="stat-num" id="agent-error-count">0</span>
+                        <span class="stat-name">异常</span>
+                    </div>
+                </div>
+                
+                <!-- 智能体卡片列表 -->
+                <div class="agents-grid" id="agents-grid">
+                    <div class="empty-state">
+                        <span class="empty-icon">🤖</span>
+                        <p>暂无运行中的智能体</p>
+                        <button class="btn btn-primary" onclick="showCreateAgentModal()">
+                            创建第一个智能体
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 智能体详情页面 -->
+            <div id="page-agent-detail" class="page">
                 <header class="page-header">
-                    <h2>👥 角色管理</h2>
+                    <div>
+                        <h2>🤖 智能体详情</h2>
+                        <p class="subtitle" id="agent-detail-name">加载中...</p>
+                    </div>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="backToAgents()">
+                            ← 返回列表
+                        </button>
+                        <button class="btn btn-primary" id="btn-restart-agent" onclick="restartAgent(state.currentAgentId)">
+                            🔄 重启
+                        </button>
+                        <button class="btn btn-danger" id="btn-delete-agent" onclick="deleteAgent(state.currentAgentId)">
+                            🗑️ 删除
+                        </button>
+                    </div>
                 </header>
-                <div id="roles-grid" class="roles-grid"></div>
+
+                <div class="agent-detail-content">
+                    <div class="detail-info-card">
+                        <h3>基本信息</h3>
+                        <div class="detail-info-grid">
+                            <div class="detail-info-item">
+                                <span class="detail-label">ID</span>
+                                <span class="detail-value" id="agent-detail-id">-</span>
+                            </div>
+                            <div class="detail-info-item">
+                                <span class="detail-label">角色</span>
+                                <span class="detail-value" id="agent-detail-role">-</span>
+                            </div>
+                            <div class="detail-info-item">
+                                <span class="detail-label">状态</span>
+                                <span class="detail-value" id="agent-detail-status">-</span>
+                            </div>
+                            <div class="detail-info-item">
+                                <span class="detail-label">创建时间</span>
+                                <span class="detail-value" id="agent-detail-created">-</span>
+                            </div>
+                            <div class="detail-info-item">
+                                <span class="detail-label">最后活跃</span>
+                                <span class="detail-value" id="agent-detail-active">-</span>
+                            </div>
+                            <div class="detail-info-item">
+                                <span class="detail-label">重启次数</span>
+                                <span class="detail-value" id="agent-detail-restarts">0</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-actions-card">
+                        <h3>快速操作</h3>
+                        <div class="detail-actions">
+                            <button class="btn btn-secondary" onclick="restartAgent(state.currentAgentId)">
+                                🔄 重启智能体
+                            </button>
+                            <button class="btn btn-primary" onclick="stopAgent(state.currentAgentId)">
+                                ⏹️ 停止智能体
+                            </button>
+                            <button class="btn btn-danger" onclick="deleteAgent(state.currentAgentId)">
+                                🗑️ 删除智能体
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 项目管理页面 -->
+            <div id="page-projects" class="page">
+                <div class="page-header">
+                    <div>
+                        <h2>📁 项目管理</h2>
+                        <p class="subtitle">多项目隔离管理</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="showCreateProjectModal()">
+                        ➕ 创建项目
+                    </button>
+                </div>
+                
+                <!-- 当前项目 -->
+                <div class="current-project-section">
+                    <h3>当前项目</h3>
+                    <div class="project-card active" id="current-project-card">
+                        <div class="project-info">
+                            <div class="project-name" id="current-project-name">加载中...</div>
+                            <div class="project-path" id="current-project-path">-</div>
+                        </div>
+                        <div class="project-stats">
+                            <div class="project-stat">
+                                <span class="ps-value" id="current-tasks">0</span>
+                                <span class="ps-label">任务</span>
+                            </div>
+                            <div class="project-stat">
+                                <span class="ps-value" id="current-agents">0</span>
+                                <span class="ps-label">智能体</span>
+                            </div>
+                            <div class="project-stat">
+                                <span class="ps-value" id="current-completion">0%</span>
+                                <span class="ps-label">完成度</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 项目列表 -->
+                <div class="projects-list-section">
+                    <h3>所有项目</h3>
+                    <div class="projects-grid" id="projects-grid">
+                        <div class="empty-state">
+                            <span class="empty-icon">📁</span>
+                            <p>暂无其他项目</p>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- 工作流页面 -->
             <div id="page-workflows" class="page">
-                <header class="page-header">
-                    <h2>🔄 工作流</h2>
-                </header>
-                <div id="workflows-list" class="workflows-list"></div>
+                <div class="page-header">
+                    <div>
+                        <h2>🔄 工作流管理</h2>
+                        <p class="subtitle">可视化的流程设计和管理</p>
+                    </div>
+                    <button class="btn btn-primary" onclick="showCreateWorkflowModal()">
+                        ➕ 创建工作流
+                    </button>
+                </div>
+                
+                <!-- 工作流模板 -->
+                <div class="workflow-templates">
+                    <h3>📐 工作流模板</h3>
+                    <div class="templates-grid" id="workflow-templates">
+                        <div class="template-card">
+                            <span class="template-icon">🔨</span>
+                            <span class="template-name">功能开发</span>
+                            <span class="template-desc">PM → 架构 → 开发 → 测试 → 文档</span>
+                        </div>
+                        <div class="template-card">
+                            <span class="template-icon">🐛</span>
+                            <span class="template-name">Bug修复</span>
+                            <span class="template-desc">分析 → 修复 → 测试 → 验证</span>
+                        </div>
+                        <div class="template-card">
+                            <span class="template-icon">♻️</span>
+                            <span class="template-name">代码重构</span>
+                            <span class="template-desc">分析 → 计划 → 重构 → 测试</span>
+                        </div>
+                        <div class="template-card">
+                            <span class="template-icon">📖</span>
+                            <span class="template-name">文档编写</span>
+                            <span class="template-desc">大纲 → 内容 → 审核 → 发布</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 自定义工作流 -->
+                <div class="custom-workflows">
+                    <h3>📋 自定义工作流</h3>
+                    <div id="workflows-list" class="workflows-list"></div>
+                </div>
             </div>
 
-            <!-- 配置页面 -->
-            <div id="page-config" class="page">
-                <header class="page-header">
-                    <h2>⚙️ 配置</h2>
-                </header>
-                <div id="config-content" class="config-content"></div>
+            <!-- 分析报告页面 -->
+            <div id="page-reports" class="page">
+                <div class="page-header">
+                    <div>
+                        <h2>📈 分析报告</h2>
+                        <p class="subtitle">数据分析和性能监控</p>
+                    </div>
+                    <div class="header-actions">
+                        <select id="report-time-range" class="filter-select">
+                            <option value="today">今天</option>
+                            <option value="week" selected>本周</option>
+                            <option value="month">本月</option>
+                            <option value="quarter">本季度</option>
+                        </select>
+                        <button class="btn btn-secondary" onclick="exportReport()">
+                            📤 导出报告
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Token使用 -->
+                <div class="report-section">
+                    <h3>💰 Token 使用统计</h3>
+                    <div class="token-stats">
+                        <div class="token-stat-card">
+                            <div class="token-icon">📊</div>
+                            <div class="token-info">
+                                <div class="token-label">总消耗</div>
+                                <div class="token-value" id="token-total">0</div>
+                            </div>
+                        </div>
+                        <div class="token-stat-card">
+                            <div class="token-icon">💵</div>
+                            <div class="token-info">
+                                <div class="token-label">预估成本</div>
+                                <div class="token-value" id="token-cost">$0.00</div>
+                            </div>
+                        </div>
+                        <div class="token-stat-card">
+                            <div class="token-icon">📈</div>
+                            <div class="token-info">
+                                <div class="token-label">日均消耗</div>
+                                <div class="token-value" id="token-daily">0</div>
+                            </div>
+                        </div>
+                        <div class="token-stat-card">
+                            <div class="token-icon">🤖</div>
+                            <div class="token-info">
+                                <div class="token-label">平均/任务</div>
+                                <div class="token-value" id="token-per-task">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Token使用图表 -->
+                    <div class="chart-container">
+                        <div class="chart-placeholder" id="token-chart">
+                            <div class="chart-bars">
+                                <div class="chart-bar" style="--height: 60%"><span>周一</span></div>
+                                <div class="chart-bar" style="--height: 80%"><span>周二</span></div>
+                                <div class="chart-bar" style="--height: 45%"><span>周三</span></div>
+                                <div class="chart-bar" style="--height: 90%"><span>周四</span></div>
+                                <div class="chart-bar" style="--height: 70%"><span>周五</span></div>
+                                <div class="chart-bar" style="--height: 30%"><span>周六</span></div>
+                                <div class="chart-bar" style="--height: 20%"><span>周日</span></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 性能排名 -->
+                <div class="report-section">
+                    <h3>🏆 智能体性能排名</h3>
+                    <div class="performance-table" id="performance-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>排名</th>
+                                    <th>智能体</th>
+                                    <th>完成任务</th>
+                                    <th>Token/任务</th>
+                                    <th>成功率</th>
+                                    <th>平均耗时</th>
+                                </tr>
+                            </thead>
+                            <tbody id="performance-tbody">
+                                <tr>
+                                    <td colspan="6" class="empty">暂无数据</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 系统设置页面 -->
+            <div id="page-settings" class="page">
+                <div class="page-header">
+                    <div>
+                        <h2>⚙️ 系统设置</h2>
+                        <p class="subtitle">配置管理</p>
+                    </div>
+                </div>
+                
+                <div class="settings-container">
+                    <!-- LLM配置 -->
+                    <div class="settings-section">
+                        <h3>🤖 LLM 配置</h3>
+                        <div id="llm-config" class="settings-content"></div>
+                    </div>
+                    
+                    <!-- 角色配置 -->
+                    <div class="settings-section">
+                        <h3>👥 角色配置</h3>
+                        <div class="settings-content">
+                            <div class="roles-list" id="settings-roles-list"></div>
+                            <button class="btn btn-primary">➕ 添加角色</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 规则配置 -->
+                    <div class="settings-section">
+                        <h3>📋 规则配置</h3>
+                        <div class="settings-content">
+                            <div class="rules-list" id="settings-rules-list"></div>
+                        </div>
+                    </div>
+                    
+                    <!-- 数据管理 -->
+                    <div class="settings-section">
+                        <h3>💾 数据管理</h3>
+                        <div class="settings-content">
+                            <div class="data-actions">
+                                <button class="btn btn-secondary" onclick="exportAllData()">
+                                    📤 导出数据
+                                </button>
+                                <button class="btn btn-secondary" onclick="importData()">
+                                    📥 导入数据
+                                </button>
+                                <button class="btn btn-danger" onclick="clearAllData()">
+                                    🗑️ 清除所有数据
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
+    </div>
+
+    <!-- Toast 通知容器 -->
+    <div id="toast-container" class="toast-container"></div>
+
+    <!-- 加载遮罩 -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+        </div>
     </div>
 
     <!-- 创建任务模态框 -->
     <div id="modal-create-task" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>创建新任务</h3>
+                <h3>📋 创建新任务</h3>
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body">
@@ -175,44 +793,190 @@
                     <div class="form-group">
                         <label>任务类型</label>
                         <select name="type" required>
-                            <option value="requirement-analysis">需求分析</option>
-                            <option value="architecture-design">架构设计</option>
-                            <option value="development">开发</option>
-                            <option value="testing">测试</option>
-                            <option value="documentation">文档</option>
-                            <option value="code-review">代码审查</option>
-                            <option value="refactoring">重构</option>
-                            <option value="bug-fix">Bug修复</option>
+                            <option value="requirement-analysis">📝 需求分析</option>
+                            <option value="architecture-design">🏗️ 架构设计</option>
+                            <option value="development" selected>💻 开发</option>
+                            <option value="testing">🧪 测试</option>
+                            <option value="documentation">📖 文档</option>
+                            <option value="code-review">👀 代码审查</option>
+                            <option value="refactoring">♻️ 重构</option>
+                            <option value="bug-fix">🐛 Bug修复</option>
                         </select>
                     </div>
                     <div class="form-group">
                         <label>标题</label>
-                        <input type="text" name="title" required>
+                        <input type="text" name="title" placeholder="简要描述任务目标" required>
                     </div>
                     <div class="form-group">
-                        <label>描述</label>
-                        <textarea name="description" rows="4" required></textarea>
+                        <label>详细描述</label>
+                        <textarea name="description" rows="4" placeholder="详细描述任务要求，包括验收标准..." required></textarea>
                     </div>
-                    <div class="form-group">
-                        <label>优先级</label>
-                        <select name="priority">
-                            <option value="low">低</option>
-                            <option value="medium" selected>中</option>
-                            <option value="high">高</option>
-                            <option value="critical">紧急</option>
-                        </select>
-                    </div>
-                    <div class="form-group">
-                        <label>分配角色</label>
-                        <select name="assignedRole" id="select-role">
-                            <option value="">未分配</option>
-                        </select>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>优先级</label>
+                            <select name="priority">
+                                <option value="low">🟢 低</option>
+                                <option value="medium" selected>🟡 中</option>
+                                <option value="high">🟠 高</option>
+                                <option value="critical">🔴 紧急</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>分配角色</label>
+                            <select name="assignedRole" id="select-role">
+                                <option value="">🤖 自动分配</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="form-actions">
                         <button type="button" class="btn btn-secondary modal-close">取消</button>
-                        <button type="submit" class="btn btn-primary">创建</button>
+                        <button type="submit" class="btn btn-primary">创建任务</button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建智能体模态框 -->
+    <div id="modal-create-agent" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🤖 创建智能体</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-create-agent">
+                    <div class="form-group">
+                        <label>关联角色</label>
+                        <select name="roleId" id="select-agent-role" required>
+                            <option value="">选择角色...</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>任务ID (可选)</label>
+                        <input type="text" name="taskId" placeholder="指定要处理的任务ID">
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <textarea name="notes" rows="2" placeholder="智能体备注..."></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary modal-close">取消</button>
+                        <button type="submit" class="btn btn-primary">创建智能体</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建项目模态框 -->
+    <div id="modal-create-project" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📁 创建新项目</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-create-project">
+                    <div class="form-group">
+                        <label>项目名称 *</label>
+                        <input type="text" name="name" placeholder="输入项目名称" required>
+                    </div>
+                    <div class="form-group">
+                        <label>项目路径 *</label>
+                        <input type="text" name="path" placeholder="/path/to/project" required>
+                    </div>
+                    <div class="form-group">
+                        <label>项目描述</label>
+                        <textarea name="description" rows="3" placeholder="描述项目的目标和范围..."></textarea>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>可见性</label>
+                            <select name="visibility">
+                                <option value="private">🔒 私有</option>
+                                <option value="team">👥 团队</option>
+                                <option value="public">🌐 公开</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary modal-close">取消</button>
+                        <button type="submit" class="btn btn-primary">创建项目</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 项目详情模态框 -->
+    <div id="modal-project-detail" class="modal">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3 id="project-detail-title">📁 项目详情</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body" id="project-detail-body">
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建工作流模态框 -->
+    <div id="modal-create-workflow" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🔄 创建工作流</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-create-workflow">
+                    <div class="form-group">
+                        <label>工作流名称 *</label>
+                        <input type="text" id="workflow-name" name="name" placeholder="输入工作流名称" required>
+                    </div>
+                    <div class="form-group">
+                        <label>描述</label>
+                        <textarea id="workflow-description" name="description" rows="3" placeholder="描述工作流的目标和流程..."></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary modal-close">取消</button>
+                        <button type="button" class="btn btn-primary" onclick="createCustomWorkflow()">创建工作流</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 键盘快捷键提示 -->
+    <div id="keyboard-help" class="modal">
+        <div class="modal-content modal-sm">
+            <div class="modal-header">
+                <h3>⌨️ 键盘快捷键</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="shortcut-list">
+                    <div class="shortcut-item">
+                        <kbd>Ctrl/Cmd + N</kbd>
+                        <span>新建任务</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl/Cmd + /</kbd>
+                        <span>显示快捷键</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Ctrl/Cmd + Enter</kbd>
+                        <span>发送消息</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>Esc</kbd>
+                        <span>关闭模态框</span>
+                    </div>
+                    <div class="shortcut-item">
+                        <kbd>← / →</kbd>
+                        <span>导航切换</span>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

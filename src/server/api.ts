@@ -1,6 +1,9 @@
 import { Router, Request, Response } from 'express';
 import { ProjectAgent } from '../core/project-agent.js';
 import { TaskOrchestrator } from '../core/task-orchestrator.js';
+import { createAgentRouter } from './routes/agents.js';
+import { createWorkflowRouter } from './routes/workflows.js';
+import { createProjectRouter } from './routes/projects.js';
 import type {
   Task,
   TaskType,
@@ -14,24 +17,43 @@ export function createApiRoutes(agent: ProjectAgent): Router {
   const router = Router();
   const orchestrator = new TaskOrchestrator(agent);
 
+  // 智能体管理路由
+  router.use('/agents', createAgentRouter(agent.getAgentMgr()));
+
+  // 工作流管理路由
+  router.use('/workflows', createWorkflowRouter(agent).router);
+
+  // 项目管理路由
+  router.use('/projects', createProjectRouter(agent.getTaskManager(), agent.getAgentMgr()));
+
   // ==================== 对话式任务创建 ====================
   
   /**
    * 处理用户输入（智能判断是否属于已有任务或创建新任务）
    */
   router.post('/tasks/chat', async (req: Request, res: Response) => {
+    console.log('[API] 收到 /tasks/chat 请求');
+    console.log('[API] 请求体:', req.body);
+    
     try {
       const { message } = req.body;
+      console.log('[API] 用户消息:', message?.substring(0, 50));
+      
       if (!message || typeof message !== 'string') {
+        console.log('[API] 消息无效');
         return res.status(400).json({
           success: false,
           error: '缺少message字段',
         });
       }
 
+      console.log('[API] 调用 orchestrator.processUserInput...');
       const result = await orchestrator.processUserInput(message);
+      console.log('[API] processUserInput 返回:', result?.task?.id);
+      
       const taskManager = agent.getTaskManager();
       const task = taskManager.getTask(result.task.id);
+      console.log('[API] 任务已创建, role:', task?.assignedRole);
 
       // 序列化任务
       const serializedTask = serializeTask(task!);
@@ -45,6 +67,7 @@ export function createApiRoutes(agent: ProjectAgent): Router {
         },
       });
     } catch (error: any) {
+      console.error('[API] 处理失败:', error.message);
       res.status(500).json({
         success: false,
         error: error.message || '处理用户输入失败',
@@ -328,17 +351,45 @@ export function createApiRoutes(agent: ProjectAgent): Router {
    * 执行任务
    */
   router.post('/tasks/:id/execute', async (req: Request, res: Response) => {
+    console.log('[EXECUTE] 收到执行任务请求, taskId:', req.params.id);
+    
     try {
       const taskManager = agent.getTaskManager();
       const taskId = req.params.id;
+      console.log('[EXECUTE] 获取 TaskManager, taskId:', taskId);
+
+      // 获取任务详情
+      const taskBefore = taskManager.getTask(taskId);
+      console.log('[EXECUTE] 任务执行前:', {
+        id: taskBefore?.id,
+        title: taskBefore?.title,
+        assignedRole: taskBefore?.assignedRole,
+        status: taskBefore?.status
+      });
 
       // 异步执行任务
-      taskManager.executeTask(taskId).catch((error: Error) => {
-        console.error(`任务执行失败 ${taskId}:`, error);
+      console.log('[EXECUTE] 开始异步执行任务...');
+      taskManager.executeTask(taskId).then((result) => {
+        // 只在有错误时打印 error
+        if (result.error) {
+          console.log('[EXECUTE] 任务执行完成, result:', {
+            success: result.success,
+            error: result.error
+          });
+        } else {
+          console.log('[EXECUTE] 任务执行完成, result:', {
+            success: result.success
+          });
+        }
+      }).catch((error: Error) => {
+        console.error(`[EXECUTE] 任务执行失败 ${taskId}:`, error.message);
+        console.error(`[EXECUTE] 错误堆栈:`, error.stack);
       });
 
       // 立即返回任务信息
       const task = taskManager.getTask(taskId);
+      console.log('[EXECUTE] 返回任务信息, role:', task?.assignedRole);
+      
       if (!task) {
         return res.status(404).json({
           success: false,
@@ -352,6 +403,7 @@ export function createApiRoutes(agent: ProjectAgent): Router {
         message: '任务已开始执行',
       });
     } catch (error: any) {
+      console.error('[EXECUTE] 执行异常:', error.message);
       res.status(500).json({
         success: false,
         error: error.message || '执行任务失败',
@@ -416,50 +468,56 @@ export function createApiRoutes(agent: ProjectAgent): Router {
   // ==================== 工作流相关 ====================
   
   /**
-   * 获取所有工作流
+   * 获取所有可用角色
    */
-  router.get('/workflows', async (req: Request, res: Response) => {
+  router.get('/roles', async (req: Request, res: Response) => {
     try {
-      const workflows = agent.getWorkflows();
-      const workflowsArray = Array.from(workflows.values());
+      const roles = agent.getAvailableRoles();
+
+      const roleManager = await import('../roles/role-manager.js');
+      const manager = roleManager.getRoleManager();
+      
+      const roleDetails = await Promise.all(
+        roles.map(async (roleId) => {
+          try {
+            const role = manager.getRoleById(roleId);
+            return {
+              id: roleId,
+              name: role?.name || roleId,
+              description: role?.description || '',
+              capabilities: role?.capabilities || [],
+              responsibilities: role?.responsibilities || [],
+            };
+          } catch {
+            return {
+              id: roleId,
+              name: roleId,
+              description: '',
+              capabilities: [],
+              responsibilities: [],
+            };
+          }
+        })
+      );
 
       res.json({
         success: true,
-        data: workflowsArray,
+        data: roleDetails,
       });
     } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        error: error.message || '获取工作流列表失败',
+      console.error('获取角色列表失败:', error);
+      // 返回空列表而不是错误
+      res.json({
+        success: true,
+        data: [],
+        warnings: ['角色加载失败，将使用默认角色'],
       });
     }
   });
 
-  /**
-   * 执行工作流
-   */
-  router.post('/workflows/:id/execute', async (req: Request, res: Response) => {
-    try {
-      const workflowId = req.params.id;
-
-      // 异步执行工作流
-      agent.executeWorkflow(workflowId).catch((error: Error) => {
-        console.error(`工作流执行失败 ${workflowId}:`, error);
-      });
-
-      res.json({
-        success: true,
-        message: '工作流已开始执行',
-      });
-    } catch (error: any) {
-      res.status(500).json({
-        success: false,
-        error: error.message || '执行工作流失败',
-      });
-    }
-  });
-
-  // ==================== 工具相关 ====================
+  // ==================== 工作流管理 ====================
+  
+// ==================== 工具相关 ====================
   
   /**
    * 获取可用工具

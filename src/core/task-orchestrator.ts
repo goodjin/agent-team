@@ -24,16 +24,20 @@ export class TaskOrchestrator {
   /**
    * 处理用户输入，判断是否属于已有任务或创建新任务
    */
-  async processUserInput(userInput: string): Promise<{
+   async processUserInput(userInput: string): Promise<{
     task: Task;
     isNew: boolean;
     matchResult?: TaskMatchResult;
   }> {
+    console.log(`[TaskOrchestrator] 处理用户输入: "${userInput.substring(0, 50)}..."`);
+    
     const taskManager = this.agent.getTaskManager();
     const allTasks = taskManager.getAllTasks();
+    console.log(`[TaskOrchestrator] 当前任务数量: ${allTasks.length}`);
 
     // 尝试匹配已有任务
     const matchResult = await this.matcher.matchTask(userInput, allTasks);
+    console.log(`[TaskOrchestrator] 任务匹配结果: matched=${matchResult.matched}, taskId=${matchResult.taskId}`);
 
     if (matchResult.matched && matchResult.taskId) {
       // 属于已有任务，添加到消息历史
@@ -54,7 +58,20 @@ export class TaskOrchestrator {
     }
 
     // 创建新任务
-    const roleAssignment = await this.assignRole(userInput);
+    console.log(`[TaskOrchestrator] 开始分配角色...`);
+    let roleAssignment = await this.assignRole(userInput);
+    console.log(`[TaskOrchestrator] 角色分配结果:`, roleAssignment);
+    
+    // 确保 roleAssignment 存在且有有效的 role
+    if (!roleAssignment || !roleAssignment.role) {
+      console.warn('⚠️ 角色分配失败，使用默认 developer 角色');
+      roleAssignment = {
+        role: 'developer',
+        needsProjectManager: false,
+        priority: 'medium' as const,
+      };
+    }
+    
     const task = taskManager.createTask({
       title: await this.generateTaskTitle(userInput),
       description: userInput,
@@ -139,8 +156,12 @@ export class TaskOrchestrator {
           priority: result.priority || 'medium',
         };
       }
-    } catch (error) {
+      } catch (error) {
       console.error('角色分配失败:', error);
+      console.error('错误类型:', error instanceof Error ? error.constructor.name : typeof error);
+      if (error instanceof Error && error.message) {
+        console.error('错误消息:', error.message);
+      }
     }
 
     // 默认分配

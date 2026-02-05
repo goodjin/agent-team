@@ -10,6 +10,9 @@ import { GitCommitTool } from './git-tools.js';
 import { GitBranchTool } from './git-tools.js';
 import { GitPullTool } from './git-tools.js';
 import { GitPushTool } from './git-tools.js';
+import { TextToImageTool, TextToVideoTool, ImageToImageTool, VideoEditTool, GenerationTaskStatusTool } from './ai-generation.js';
+import { BrowseTool, SearchTool, ClickTool, InputTool, SubmitTool, ScreenshotTool, ExecuteJSTool } from './browser.js';
+import { AnalyzeCodeTool, DetectCodeSmellsTool, DiffTool, GetImportsTool } from './code-analysis.js';
 import { BaseTool } from './base.js';
 
 /**
@@ -198,19 +201,36 @@ export class ToolRegistry extends EventEmitter {
    * 注册默认工具集
    */
   private registerDefaultTools(): void {
-    // 文件工具
     this.register(new ReadFileTool());
     this.register(new WriteFileTool());
     this.register(new SearchFilesTool());
     this.register(new DeleteFileTool());
     this.register(new ListDirectoryTool());
 
-    // Git 工具
     this.register(new GitStatusTool());
     this.register(new GitCommitTool());
     this.register(new GitBranchTool());
     this.register(new GitPullTool());
     this.register(new GitPushTool());
+
+    this.register(new TextToImageTool());
+    this.register(new TextToVideoTool());
+    this.register(new ImageToImageTool());
+    this.register(new VideoEditTool());
+    this.register(new GenerationTaskStatusTool());
+
+    this.register(new BrowseTool());
+    this.register(new SearchTool());
+    this.register(new ClickTool());
+    this.register(new InputTool());
+    this.register(new SubmitTool());
+    this.register(new ScreenshotTool());
+    this.register(new ExecuteJSTool());
+
+    this.register(new AnalyzeCodeTool());
+    this.register(new DetectCodeSmellsTool());
+    this.register(new DiffTool());
+    this.register(new GetImportsTool());
   }
 
   /**

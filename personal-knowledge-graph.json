@@ -1,0 +1,32 @@
+{
+  "personalProfile": {
+    "expertise": ["TypeScript", "Node.js", "React", "System Design"],
+    "codingStyle": "clean-code-enthusiast",
+    "preferences": {
+      "architecture": "modular-microservices",
+      "testing": "TDD-with-integration",
+      "documentation": "inline-docs-first",
+      "errorHandling": "graceful-degradation"
+    },
+    "projectHistory": [
+      {
+        "type": "web-application",
+        "techStack": ["React", "Node.js", "PostgreSQL"],
+        "patterns": ["repository-pattern", "dependency-injection"]
+      }
+    ]
+  },
+  "cognitivePreferences": {
+    "complexityThreshold": "high",
+    "decisionStyle": "analytical-with-prototyping",
+    "learningPattern": "hands-on-experimentation",
+    "focusHours": [9, 10, 11, 14, 15, 16, 21, 22, 23]
+  },
+  "aiCollaborationConfig": {
+    "defaultModel": "claude-3-opus",
+    "codingModel": "deepseek-coder",
+    "fastModel": "claude-3-haiku",
+    "contextWindow": "maximum",
+    "explanationDepth": "detailed-with-alternatives"
+  }
+}

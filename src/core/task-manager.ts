@@ -238,7 +238,14 @@ export class TaskManager extends EventEmitter {
    */
   async executeTask(taskId: string): Promise<ToolResult> {
     const task = this.tasks.get(taskId);
+    console.log('[TaskManager.executeTask] 获取任务:', {
+      id: task?.id,
+      title: task?.title,
+      assignedRole: task?.assignedRole
+    });
+    
     if (!task) {
+      console.error('[TaskManager.executeTask] 任务不存在:', taskId);
       throw new Error(`Task not found: ${taskId}`);
     }
 
@@ -341,8 +348,36 @@ export class TaskManager extends EventEmitter {
         }
       }
 
-      return result;
+      // 清理结果，确保没有 undefined
+      const cleanResult: any = {
+        success: result.success,
+        data: result.data,
+        metadata: result.metadata,
+      };
+      
+      // 只有在有错误时才添加 error 字段
+      if (result.error) {
+        cleanResult.error = result.error;
+      }
+
+      return cleanResult as ToolResult;
     } catch (error) {
+      // 详细的错误日志
+      console.error('='.repeat(60));
+      console.error('❌ 任务执行异常');
+      console.error('='.repeat(60));
+      console.error(`任务ID: ${taskId}`);
+      console.error(`任务标题: ${task.title}`);
+      console.error(`分配角色: ${task.assignedRole}`);
+      if (error instanceof Error) {
+        console.error(`错误类型: ${error.constructor.name}`);
+        console.error(`错误消息: ${error.message}`);
+        console.error(`错误堆栈: ${error.stack}`);
+      } else {
+        console.error(`错误内容: ${error}`);
+      }
+      console.error('='.repeat(60));
+
       // 转换为用户友好错误
       const userError = getUserFriendlyError(error as Error, {
         taskId,

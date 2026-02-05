@@ -1,5 +1,6 @@
-import express from 'express';
+import express, { Request, Response } from 'express';
 import path from 'path';
+import os from 'os';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { ProjectAgent } from '../core/project-agent.js';
@@ -53,18 +54,26 @@ export class AgentTeamServer {
   private findConfigPaths(projectPath: string): { llm?: string; prompts?: string | string[] } {
     const configPaths: { llm?: string; prompts?: string | string[] } = {};
 
-    // 尝试查找统一配置文件（按优先级）
-    const configPathsToTry = [
-      path.join(projectPath, '.agent-team', 'config.yaml'),
-      path.join(projectPath, '.agent-team.yaml'),
-      path.join(projectPath, 'agent.config.yaml'),
-      path.join(projectPath, 'llm.config.json'),
-    ];
+    // 优先使用 home 目录的配置 ~/.agent-team/config.yaml
+    const homeConfigPath = path.join(os.homedir(), '.agent-team', 'config.yaml');
+    if (fs.existsSync(homeConfigPath)) {
+      configPaths.llm = homeConfigPath;
+      console.log(`📁 使用配置文件: ${homeConfigPath}`);
+    } else {
+      // 降级到项目目录查找
+      const projectConfigPaths = [
+        path.join(projectPath, '.agent-team', 'config.yaml'),
+        path.join(projectPath, '.agent-team.yaml'),
+        path.join(projectPath, 'agent.config.yaml'),
+        path.join(projectPath, 'llm.config.json'),
+      ];
 
-    for (const configPath of configPathsToTry) {
-      if (fs.existsSync(configPath)) {
-        configPaths.llm = configPath;
-        break;
+      for (const configPath of projectConfigPaths) {
+        if (fs.existsSync(configPath)) {
+          configPaths.llm = configPath;
+          console.log(`📁 使用配置文件: ${configPath}`);
+          break;
+        }
       }
     }
 
@@ -111,12 +120,23 @@ export class AgentTeamServer {
   }
 
   private setupRoutes() {
+    // Health check route
+    this.app.get('/health', (_req: Request, res: Response) => {
+      res.json({
+        success: true,
+        data: {
+          status: 'ok',
+          timestamp: new Date().toISOString(),
+        },
+      });
+    });
+
     // API路由
     this.app.use('/api', createApiRoutes(this.agent));
 
     // 前端路由 - 所有非API请求返回index.html
     this.app.get('*', (req, res) => {
-      if (!req.path.startsWith('/api')) {
+      if (!req.path.startsWith('/api') && !req.path.startsWith('/health')) {
         const projectPublicPath = path.resolve(process.cwd(), 'public');
         const distPublicPath = path.resolve(__dirname, '../../public');
         
@@ -134,23 +154,46 @@ export class AgentTeamServer {
     });
   }
 
-  async initialize() {
+async initialize() {
     try {
-      // 加载配置
+      const agentMgr = this.agent.getAgentMgr();
+      const dataPath = path.join(os.homedir(), '.agent-team', 'data');
+
+      agentMgr.configure({
+        persistencePath: path.join(dataPath, 'agents.json'),
+        restartFailedAgents: true,
+        maxRestartAttempts: 3,
+      });
+
+      await agentMgr.loadState();
+
+      agentMgr.on('agent.created', (event) => {
+        console.log(`[Agent] Agent created: ${event.data.agent.name} (${event.data.agent.id})`);
+      });
+
+      agentMgr.on('agent.status.changed', (event) => {
+        console.log(`[Agent] ${event.data.agent.name}: ${event.data.oldStatus} -> ${event.data.newStatus}`);
+      });
+
+      agentMgr.on('agent.auto-restarted', (event) => {
+        console.log(`[Agent] Auto-restarted: ${event.data.agent.name} (attempt ${event.data.restartCount})`);
+      });
+
+      agentMgr.startMonitoring(30000);
+
       await this.agent.loadConfig();
-      
-      // 检查配置状态并输出详细信息
+
       const llmConfig = this.agent.getLLMConfig();
       const manager = await import('../services/llm-config.js');
       const configManager = manager.getLLMConfigManager();
       const settings = configManager.getSettings();
-      
+
       if (settings) {
         console.log('\n📋 LLM配置详情:');
         for (const [name, provider] of Object.entries(settings.providers)) {
           const isEnabled = configManager.isEnabled(name);
           const hasKey = configManager.hasValidApiKey(name);
-          const status = isEnabled 
+          const status = isEnabled
             ? (hasKey ? '✅ 可用' : '⚠️  已启用但缺少有效API Key')
             : '❌ 已禁用';
           console.log(`  ${status} ${provider.name} (${name})`);
@@ -159,10 +202,10 @@ export class AgentTeamServer {
           }
         }
       }
-      
+
       const enabledProviders = llmConfig.providers || [];
       if (enabledProviders.length === 0) {
-        console.warn('\n⚠️  警告: 没有可用的LLM服务商');
+        console.warn('\n⚠️ 警告: 没有可用的LLM服务商');
         console.warn('   提示: 请检查配置文件，确保至少有一个服务商设置为 enabled: true 且有有效的 API Key');
       } else {
         console.log(`\n✅ Agent配置加载成功，${enabledProviders.length} 个服务商可用\n`);
@@ -189,6 +232,14 @@ export class AgentTeamServer {
   }
 
   async stop() {
+    try {
+      const agentMgr = this.agent.getAgentMgr();
+      agentMgr.stopMonitoring();
+      await agentMgr.saveState();
+    } catch (error) {
+      console.error('Error saving agent state:', error);
+    }
+
     return new Promise<void>((resolve) => {
       if (this.server) {
         this.server.close(() => {
@@ -203,6 +254,10 @@ export class AgentTeamServer {
 
   getAgent(): ProjectAgent {
     return this.agent;
+  }
+
+  getApp(): express.Application {
+    return this.app;
   }
 }
 

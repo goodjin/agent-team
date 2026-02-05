@@ -53,3 +53,6 @@ export { validateSync, validateConfigDetailed, validateConfigQuick } from './con
 
 // 配置迁移
 export { migrateLegacyConfig, migrateAll, checkMigrationNeeded, type MigrationResult } from './config-migrator.js';
+
+// 守护进程管理
+export { Daemon, createDaemon, type DaemonConfig, type DaemonStatus, type DaemonEvents } from './daemon.js';

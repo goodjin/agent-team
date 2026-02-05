@@ -138,6 +138,7 @@ export interface TaskConstraints {
 
 // 项目配置
 export interface ProjectConfig {
+  projectId?: string;
   projectName: string;
   projectPath: string;
   llmConfig?: LLMConfig; // 可选：如果不提供，将从配置文件加载
@@ -161,6 +162,7 @@ export interface ProjectConstraints {
   testFramework?: 'jest' | 'vitest' | 'mocha' | 'custom';
   testCoverage?: number;
   maxFileSize?: number;
+  maxDuration?: number;
   forbiddenPatterns?: string[];
   requiredPatterns?: string[];
   customStandards?: string[];
@@ -170,7 +172,7 @@ export interface ProjectConstraints {
 export interface ToolDefinition {
   name: string;
   description: string;
-  category: 'file' | 'git' | 'code' | 'test' | 'deploy' | 'custom';
+  category: 'file' | 'git' | 'code' | 'test' | 'deploy' | 'custom' | 'ai-generation' | 'browser';
   execute: (params: any) => Promise<ToolResult>;
   schema?: z.ZodType; // 参数验证 schema
   requiresAuth?: boolean;
@@ -332,6 +334,69 @@ export interface LLMResponse {
   finishReason?: string;
 }
 
+// 工具调用
+export interface ToolCall {
+  id: string;
+  type: 'function';
+  function: {
+    name: string;
+    arguments: string;
+  };
+}
+
+// 聊天消息
+export interface ChatMessage {
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  toolCalls?: ToolCall[];
+  toolCallId?: string;
+}
+
+// 聊天请求
+export interface ChatRequest {
+  messages: ChatMessage[];
+  model?: string;
+  temperature?: number;
+  maxTokens?: number;
+  stream?: boolean;
+  tools?: ToolDefinition[];
+  toolChoice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
+}
+
+// 聊天响应
+export interface ChatResponse {
+  id: string;
+  model: string;
+  choices: {
+    index: number;
+    message: {
+      role: 'assistant';
+      content: string;
+      toolCalls?: ToolCall[];
+    };
+    finishReason: string;
+  }[];
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+}
+
+// Token 统计
+export interface TokenStats {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+// 提供商信息
+export interface ProviderInfo {
+  name: string;
+  enabled: boolean;
+  models: string[];
+}
+
 // 项目分析结果
 export interface ProjectAnalysis {
   structure: FileNode;
@@ -469,3 +534,107 @@ export interface Tradeoff {
   cons: string[];
   rationale: string;
 }
+
+// ============ API.md 类型定义 ============
+
+export type Result<T> = {
+  success: boolean;
+  data?: T;
+  error?: {
+    code: string;
+    message: string;
+    details?: any;
+  };
+};
+
+export type AsyncResult<T> = Promise<Result<T>>;
+
+export type ProjectStatus = 'active' | 'archived';
+
+export interface Project {
+  id: string;
+  name: string;
+  path: string;
+  description?: string;
+  status: ProjectStatus;
+  config: ProjectConfig;
+  metadata: {
+    createdAt: Date;
+    updatedAt: Date;
+    version?: string;
+  };
+}
+
+export type TaskStatusAPI = 'pending' | 'running' | 'done';
+
+export interface TaskAPI {
+  id: string;
+  projectId: string;
+  category: string;
+  title: string;
+  description: string;
+  progress: string;
+  status: TaskStatusAPI;
+  agentId?: string;
+  createdAt: Date;
+  updatedAt: Date;
+  completedAt?: Date;
+}
+
+export type AgentStatus = 'idle' | 'running' | 'stopped';
+
+export interface Agent {
+  id: string;
+  roleId: string;
+  projectId: string;
+  name: string;
+  status: AgentStatus;
+  currentTaskId?: string;
+  llmProvider?: string;
+  llmModel?: string;
+  metadata: {
+    createdAt: Date;
+    lastActiveAt: Date;
+    restartCount: number;
+  };
+}
+
+export type RoleTypeAPI = 'product-manager' | 'project-manager' | 'architect' | 'developer' | 'tester' | 'doc-writer' | 'custom';
+
+export interface Role {
+  id: string;
+  name: string;
+  type: RoleTypeAPI;
+  description: string;
+  promptPath: string;
+  createdBy: 'system' | 'user' | 'llm';
+  createdAt?: Date;
+  enabled: boolean;
+}
+
+export type RuleType = 'global' | 'project' | 'role';
+
+export interface Rule {
+  id: string;
+  name: string;
+  type: RuleType;
+  filePath: string;
+  scope?: string;
+  enabled: boolean;
+}
+
+export type EventType =
+  | 'task.created'
+  | 'task.started'
+  | 'task.completed'
+  | 'task.failed'
+  | 'agent.created'
+  | 'agent.stopped';
+
+export interface Event<T = any> {
+  type: EventType;
+  data: T;
+  timestamp: Date;
+}
+
+export type EventHandler = (event: Event) => void | Promise<void>;

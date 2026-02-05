@@ -18,6 +18,9 @@ import pathModule from 'path';
 import { fileURLToPath } from 'url';
 import { getPromptLoader } from '../prompts/loader.js';
 import { getLLMConfigManager, type ConfigValidationResult } from '../services/llm-config.js';
+import { AgentMgr } from './agent-mgr.js';
+import { EventSystem } from './events.js';
+import { WorkflowEngine } from './workflow-engine.js';
 
 /**
  * 核心 Project Agent 类
@@ -27,8 +30,11 @@ export class ProjectAgent {
   private config: ProjectConfig;
   private toolRegistry: ToolRegistry;
   private taskManager: TaskManager;
+  private eventSystem: EventSystem;
+  private agentMgr: AgentMgr;
   private eventListeners: Map<AgentEvent, Set<EventListener>> = new Map();
   private workflows: Map<string, Workflow> = new Map();
+  public workflowEngine: WorkflowEngine;
   private promptConfigPaths: string[] = [];
   private llmConfigPath: string | null = null;
 
@@ -41,7 +47,10 @@ export class ProjectAgent {
   ) {
     this.config = config;
     this.toolRegistry = new ToolRegistry();
+    this.eventSystem = new EventSystem();
+    this.agentMgr = new AgentMgr(config.projectId || 'default', this.eventSystem);
     this.taskManager = new TaskManager(config, this.toolRegistry);
+    this.workflowEngine = new WorkflowEngine(this);
 
     // 设置提示词配置路径
     if (configPaths?.prompts) {
@@ -537,10 +546,25 @@ export class ProjectAgent {
     return this.taskManager;
   }
 
-  /**
-   * 获取工具注册表（用于HTTP服务器等需要直接访问的场景）
-   */
+/**
+    * 获取工具注册表（用于HTTP服务器等需要直接访问的场景）
+    */
   getToolRegistry(): ToolRegistry {
     return this.toolRegistry;
   }
-}
+
+  /**
+    * 获取智能体管理器（用于HTTP服务器等需要直接访问的场景）
+    */
+  getAgentMgr(): AgentMgr {
+    return this.agentMgr;
+  }
+
+/**
+     * 获取事件系统（用于HTTP服务器等需要直接访问的场景）
+     */
+  getEventSystem(): EventSystem {
+    return this.eventSystem;
+  }
+
+  }

@@ -86,15 +86,21 @@ export function validateRole(role: RoleDefinition): RoleValidationResult {
     warnings.push('缺少角色约束列表 (constraints)');
   }
 
-  // 验证 LLM 配置
+  // 验证 LLM 配置 - 内置角色从全局配置获取，可以不定义
   if (!role.llm) {
-    errors.push('缺少 LLM 配置 (llm)');
+    if (!BUILT_IN_ROLE_IDS.includes(role.id)) {
+      errors.push('缺少 LLM 配置 (llm)');
+    }
   } else {
     if (!role.llm.provider) {
-      errors.push('缺少 LLM 提供商 (llm.provider)');
+      if (!BUILT_IN_ROLE_IDS.includes(role.id)) {
+        errors.push('缺少 LLM 提供商 (llm.provider)');
+      }
     }
     if (!role.llm.model) {
-      errors.push('缺少 LLM 模型 (llm.model)');
+      if (!BUILT_IN_ROLE_IDS.includes(role.id)) {
+        errors.push('缺少 LLM 模型 (llm.model)');
+      }
     }
     if (role.llm.temperature !== undefined) {
       if (typeof role.llm.temperature !== 'number' || role.llm.temperature < 0 || role.llm.temperature > 1) {

@@ -109,11 +109,49 @@ export class Tester extends BaseRole {
       sections.push('');
     }
 
-    // 添加代码信息
-    if (task.input?.code) {
+    // 添加代码信息（优先从stepOutputs获取）
+    let codeToTest: string | undefined;
+    let testsToVerify: string | undefined;
+
+    if (task.input?.stepOutputs) {
+      for (const [stepId, output] of Object.entries(task.input.stepOutputs)) {
+        const out = output as any;
+        if (out?.code && !codeToTest) {
+          codeToTest = out.code;
+        }
+        if (out?.tests && !testsToVerify) {
+          testsToVerify = out.tests;
+        }
+        if (out?.files && Array.isArray(out.files)) {
+          for (const file of out.files) {
+            if (file.content) {
+              if (file.path.includes('test') || file.path.includes('spec')) {
+                testsToVerify = file.content;
+              } else if (!codeToTest) {
+                codeToTest = file.content;
+              }
+            }
+          }
+        }
+      }
+    }
+
+    if (task.input?.code && !codeToTest) {
+      codeToTest = task.input.code;
+    }
+
+    if (codeToTest) {
       sections.push('## 待测试代码');
       sections.push('```');
-      sections.push(task.input.code);
+      sections.push(codeToTest);
+      sections.push('```');
+      sections.push('');
+    }
+
+    if (testsToVerify) {
+      sections.push('## 已有的测试代码（请验证并补充）');
+      sections.push('```');
+      sections.push(testsToVerify);
       sections.push('```');
       sections.push('');
     }
@@ -139,7 +177,7 @@ export class Tester extends BaseRole {
       sections.push('');
     }
 
-    sections.push('## 请设计测试方案并提供测试代码。');
+    sections.push('## 请设计测试方案，验证已有测试代码并补充新的测试用例。');
 
     return sections.join('\n');
   }
@@ -163,14 +201,18 @@ export class Tester extends BaseRole {
   }
 
   protected async validateOutput(output: any): Promise<any> {
-    if (!output.testCases || output.testCases.length === 0) {
-      throw new Error('至少需要一个测试用例');
+    const hasNewTestCases = output.testCases && output.testCases.length > 0;
+    const hasTestCode = output.testCode && output.testCode.length > 0;
+
+    if (!hasNewTestCases && !hasTestCode) {
+      throw new Error('至少需要一个测试用例或测试代码');
     }
 
-    // 验证测试用例结构
-    for (const testCase of output.testCases) {
-      if (!testCase.id || !testCase.scenario || !testCase.steps) {
-        throw new Error('测试用例结构不完整');
+    if (hasNewTestCases) {
+      for (const testCase of output.testCases) {
+        if (!testCase.id || !testCase.scenario || !testCase.steps) {
+          throw new Error('测试用例结构不完整');
+        }
       }
     }
 
