@@ -637,4 +637,21 @@ export interface Event<T = any> {
   timestamp: Date;
 }
 
-export type EventHandler = (event: Event) => void | Promise<void>;
+export interface TaskWorkDirConfig {
+  path?: string;
+  basePath?: string;
+  template?: 'default' | 'minimal' | 'custom';
+  customDirs?: string[];
+  preserve?: boolean;
+}
+
+export interface TaskInput {
+  variables?: Record<string, any>;
+  stepConfig?: Record<string, any>;
+  stepOutputs?: Record<string, any>;
+  workDir?: TaskWorkDirConfig;
+  workDirState?: import('./work-dir.js').WorkDirState;
+  [key: string]: any;
+}
+
+export type { WorkDirState } from './work-dir.js';

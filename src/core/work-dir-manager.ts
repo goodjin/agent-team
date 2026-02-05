@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import * as fsSync from 'fs';
 import * as path from 'path';
 import type { WorkDirConfig, WorkDirState, WorkDirStructure, WorkDirMeta, PathValidationResult } from '../types/work-dir.js';
 
@@ -7,6 +8,43 @@ const DIRECTORIES = ['src', 'tests', 'docs', 'output', '.agent-state'];
 
 export class WorkDirManager {
   private states: Map<string, WorkDirState> = new Map();
+
+  createWorkDirSync(config: WorkDirConfig): WorkDirState {
+    const basePath = config.basePath || DEFAULT_BASE_PATH;
+    const rootPath = config.customPath || path.resolve(basePath, config.taskId);
+    const template = config.template || 'default';
+
+    const structure = this.buildStructure(rootPath);
+
+    const state: WorkDirState = {
+      taskId: config.taskId,
+      rootPath,
+      structure,
+      createdAt: new Date(),
+      lastAccessedAt: new Date(),
+      files: [],
+      metadata: {
+        totalSize: 0,
+        fileCount: 0,
+      },
+      preserve: config.preserve || false,
+    };
+
+    this.createDirectoriesSync(structure, config);
+
+    if (template === 'custom' && config.customDirs) {
+      for (const dir of config.customDirs) {
+        const fullPath = path.resolve(rootPath, dir);
+        fsSync.mkdirSync(fullPath, { recursive: true });
+        structure[dir as keyof WorkDirStructure] = fullPath;
+      }
+    }
+
+    this.writeMetaSync(state, template);
+
+    this.states.set(config.taskId, state);
+    return state;
+  }
 
   async createWorkDir(config: WorkDirConfig): Promise<WorkDirState> {
     const basePath = config.basePath || DEFAULT_BASE_PATH;
@@ -54,6 +92,29 @@ export class WorkDirManager {
       output: path.resolve(rootPath, 'output'),
       state: path.resolve(rootPath, '.agent-state'),
     };
+  }
+
+  private createDirectoriesSync(structure: WorkDirStructure, config: WorkDirConfig): void {
+    const dirs = config.template === 'minimal'
+      ? ['src', 'tests', '.agent-state']
+      : DIRECTORIES;
+
+    for (const dir of dirs) {
+      const dirPath = dir === '.agent-state' ? structure.state : path.resolve(structure.root, dir);
+      fsSync.mkdirSync(dirPath, { recursive: true });
+    }
+  }
+
+  private writeMetaSync(state: WorkDirState, template: string): void {
+    const meta: WorkDirMeta = {
+      taskId: state.taskId,
+      createdAt: state.createdAt.toISOString(),
+      lastAccessedAt: state.lastAccessedAt.toISOString(),
+      template,
+    };
+
+    const metaPath = path.resolve(state.structure.state, 'meta.json');
+    fsSync.writeFileSync(metaPath, JSON.stringify(meta, null, 2));
   }
 
   private async createDirectories(structure: WorkDirStructure, config: WorkDirConfig): Promise<void> {

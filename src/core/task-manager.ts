@@ -11,6 +11,8 @@ import type {
   ExecutionContext,
   TaskMessage,
   TaskExecutionRecord,
+  TaskInput,
+  TaskWorkDirConfig,
 } from '../types/index.js';
 import { RoleFactory } from '../roles/index.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
@@ -25,6 +27,7 @@ import {
   ErrorCode,
 } from '../types/errors.js';
 import { ErrorDisplay } from '../utils/error-display.js';
+import { WorkDirManager } from './work-dir-manager.js';
 
 /**
  * 任务管理器
@@ -34,19 +37,19 @@ export class TaskManager extends EventEmitter {
   private tasks: Map<string, Task> = new Map();
   private projectConfig: ProjectConfig;
   private toolRegistry: ToolRegistry;
-  private llmService?: LLMService; // 改为可选
+  private llmService?: LLMService;
   private executingTasks: Set<string> = new Set();
   private errorDisplay: ErrorDisplay;
+  private workDirManager: WorkDirManager;
 
   constructor(projectConfig: ProjectConfig, toolRegistry: ToolRegistry) {
     super();
     this.projectConfig = projectConfig;
     this.toolRegistry = toolRegistry;
-    // llmConfig 现在是可选的，如果提供则创建服务
+    this.workDirManager = new WorkDirManager();
     if (projectConfig.llmConfig) {
       this.llmService = LLMServiceFactory.create(projectConfig.llmConfig);
     }
-    // 初始化错误展示器
     this.errorDisplay = new ErrorDisplay({
       showDetails: true,
       showSuggestions: true,
@@ -65,10 +68,10 @@ export class TaskManager extends EventEmitter {
     dependencies?: string[];
     assignedRole?: Task['assignedRole'];
     ownerRole?: Task['ownerRole'];
-    input?: any;
+    input?: TaskInput;
     constraints?: Task['constraints'];
     subtasks?: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'status'>[];
-    initialMessage?: string; // 初始用户消息
+    initialMessage?: string;
   }): Task {
     const task: Task = {
       id: uuidv4(),
@@ -80,7 +83,7 @@ export class TaskManager extends EventEmitter {
       dependencies: params.dependencies || [],
       assignedRole: params.assignedRole,
       ownerRole: params.ownerRole,
-      input: params.input,
+      input: params.input || {},
       constraints: params.constraints,
       metadata: {},
       createdAt: new Date(),
@@ -99,6 +102,19 @@ export class TaskManager extends EventEmitter {
       }] : [],
       executionRecords: [],
     };
+
+    if (params.input?.workDir) {
+      const workDirState = this.workDirManager.createWorkDirSync({
+        taskId: task.id,
+        customPath: params.input.workDir.path,
+        basePath: params.input.workDir.basePath || 'workspace',
+        template: params.input.workDir.template || 'default',
+        customDirs: params.input.workDir.customDirs,
+        preserve: params.input.workDir.preserve,
+      });
+
+      task.input.workDirState = workDirState;
+    }
 
     this.tasks.set(task.id, task);
 
