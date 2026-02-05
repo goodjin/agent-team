@@ -3,6 +3,8 @@ import express from 'express';
 import request from 'supertest';
 import { createRoleRouter } from '../src/server/routes/roles.js';
 import { createAgentRouter } from '../src/server/routes/agents.js';
+import { AgentMgr } from '../src/core/agent-mgr.js';
+import { EventSystem } from '../src/core/events.js';
 
 describe('Role and Agent Routes', () => {
   describe('Role Routes', () => {
@@ -116,11 +118,16 @@ describe('Role and Agent Routes', () => {
 
   describe('Agent Routes', () => {
     let app: express.Application;
+    let agentMgr: AgentMgr;
+    let eventSystem: EventSystem;
 
     beforeEach(() => {
+      eventSystem = new EventSystem();
+      agentMgr = new AgentMgr('test-project', eventSystem);
+
       app = express();
       app.use(express.json());
-      app.use('/api/agents', createAgentRouter());
+      app.use('/api/agents', createAgentRouter(agentMgr));
     });
 
     describe('GET /api/agents', () => {
@@ -181,26 +188,39 @@ describe('Role and Agent Routes', () => {
         const response = await request(app)
           .post('/api/agents/')
           .send({ name: 'Incomplete Agent' })
-          .expect(500);
+          .expect(400);
 
         expect(response.body.success).toBe(false);
+        expect(response.body.error.code).toBe('MISSING_FIELDS');
       });
-    });
 
-    describe('POST /api/agents/:id/restart', () => {
-      it('should restart an agent', async () => {
-        const response = await request(app)
-          .post('/api/agents/test-agent/restart')
+      it('should create an agent and allow restart', async () => {
+        const createResponse = await request(app)
+          .post('/api/agents/')
+          .send({ roleId: 'developer', projectId: 'test-project' })
+          .expect(201);
+
+        const agentId = createResponse.body.data.id;
+
+        const restartResponse = await request(app)
+          .post(`/api/agents/${agentId}/restart`)
           .expect(200);
 
-        expect(response.body.success).toBe(true);
+        expect(restartResponse.body.success).toBe(true);
       });
     });
 
     describe('DELETE /api/agents/:id', () => {
       it('should delete an agent', async () => {
+        const createResponse = await request(app)
+          .post('/api/agents/')
+          .send({ roleId: 'developer', projectId: 'test-project' })
+          .expect(201);
+
+        const agentId = createResponse.body.data.id;
+
         const response = await request(app)
-          .delete('/api/agents/test-agent')
+          .delete(`/api/agents/${agentId}`)
           .expect(200);
 
         expect(response.body.success).toBe(true);

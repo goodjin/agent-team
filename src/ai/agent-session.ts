@@ -140,6 +140,14 @@ export class AIAgentSession {
       return true;
     }
 
+    // Bug 修复
+    if (command === '/bugfix') {
+      console.log('\n🐛 启动 Bug Fix 流程...\n');
+      console.log('请描述遇到的问题或错误信息');
+      console.log('示例: 测试失败了 / API 返回 500 错误\n');
+      return true;
+    }
+
     return false;
   }
 
@@ -163,14 +171,8 @@ export class AIAgentSession {
     console.log('  • 输入 /verbose 切换思考模式');
     console.log('  • 输入 /history 查看对话历史');
     console.log('  • 输入 /clear 清除历史');
-    console.log('  • 输入 /exit 退出程序\n');
-    console.log('📌 示例:\n');
-    console.log('  "分析这个项目的结构"');
-    console.log('  "读取 package.json 文件"');
-    console.log('  "搜索包含 "login" 的文件"');
-    console.log('  "帮我优化这段代码"');
-    console.log('  "修复这个错误: ..."');
-    console.log('');
+    console.log('  • 输入 /bugfix 启动 Bug 修复流程');
+    console.log('  • 输入 /exit 退出\n');
   }
 
   /**
