@@ -2,6 +2,18 @@
 
 This document provides guidelines for AI agents working in this codebase.
 
+## Available Skills
+
+### Bug Fix Skill
+- **Location**: `~/.claude/skills/bugfix/SKILL.md`
+- **Trigger**: 用户报告错误、操作失败、系统报错时
+- **Usage**: 输入 `/bugfix` 或描述错误
+
+### PRD Builder Skill
+- **Location**: `~/.claude/skills/prd-builder/SKILL.md`
+- **Trigger**: 用户输入包含需求相关内容时
+- **Keywords**: "需要开发"、"想做"、"想要"、"功能"、"需求"
+
 ## Build, Lint, and Test Commands
 
 ### Core Commands
