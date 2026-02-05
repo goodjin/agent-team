@@ -11,6 +11,7 @@ import type {
 } from '../types/index.js';
 import { LLMService } from '../services/llm.service.js';
 import { getPromptLoader } from '../prompts/loader.js';
+import { WorkDirManager } from '../core/work-dir-manager.js';
 
 /**
  * 基础角色类
@@ -20,11 +21,18 @@ export abstract class BaseRole {
   protected definition: RoleDefinition;
   protected llmService: LLMService;
   protected customSystemPrompt?: string;
+  protected workDirManager: WorkDirManager;
 
-  constructor(definition: RoleDefinition, llmService: LLMService, customPrompt?: string) {
+  constructor(
+    definition: RoleDefinition,
+    llmService: LLMService,
+    customPrompt?: string,
+    workDirManager?: WorkDirManager
+  ) {
     this.definition = definition;
     this.llmService = llmService;
     this.customSystemPrompt = customPrompt;
+    this.workDirManager = workDirManager || new WorkDirManager();
 
     // 如果提供了自定义提示词，更新定义
     if (customPrompt) {
@@ -97,7 +105,7 @@ export abstract class BaseRole {
     // 添加当前任务
     messages.push({
       role: 'user',
-      content: this.buildTaskPrompt(task, context),
+      content: await this.buildTaskPrompt(task, context),
     });
 
     return messages;
@@ -162,9 +170,62 @@ ${definition.outputFormat}
   }
 
   /**
+   * 构建工作目录提示词
+   */
+  protected buildWorkDirPrompt(task: Task): string {
+    const taskId = task.metadata?.taskId || task.id;
+    const state = this.workDirManager.getWorkDir(taskId);
+    if (!state) return '';
+
+    const structureDescriptions = [
+      { path: 'src/', purpose: '源代码文件' },
+      { path: 'tests/', purpose: '测试文件' },
+      { path: 'docs/', purpose: '文档文件' },
+      { path: '.agent-state/', purpose: '状态文件' },
+    ];
+
+    const structureTable = structureDescriptions
+      .map(d => `| \`${d.path}\` | ${d.purpose} |`)
+      .join('\n');
+
+    const filesList = state.files.length > 0
+      ? state.files.map(f => `- ${f}`).join('\n')
+      : '- (暂无文件)';
+
+    return `
+## 工作目录信息
+
+**重要**: 所有文件操作必须在此目录下进行！
+
+**工作目录**: \`${state.rootPath}\`
+
+### 目录结构
+| 目录 | 用途 |
+|-----|------|
+${structureTable}
+
+### 当前文件列表
+${filesList}
+`.trim();
+  }
+
+  /**
    * 构建任务提示词
    */
-  protected abstract buildTaskPrompt(task: Task, context: ExecutionContext): string;
+  protected async buildTaskPrompt(task: Task, context: ExecutionContext): Promise<string> {
+    const basePrompt = await this.buildTaskPromptImpl(task, context);
+    const workDirPrompt = this.buildWorkDirPrompt(task);
+
+    if (workDirPrompt) {
+      return `${basePrompt}\n\n${workDirPrompt}`;
+    }
+    return basePrompt;
+  }
+
+  /**
+   * 任务提示词实现（子类需重写）
+   */
+  protected abstract buildTaskPromptImpl(task: Task, context: ExecutionContext): Promise<string>;
 
   /**
    * 调用 LLM

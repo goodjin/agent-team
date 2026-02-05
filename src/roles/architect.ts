@@ -7,13 +7,14 @@ import type {
   Message,
   LLMResponse,
 } from '../types/index.js';
+import { WorkDirManager } from '../core/work-dir-manager.js';
 
 /**
  * 架构师角色
  * 负责系统设计、技术选型和架构决策
  */
 export class Architect extends BaseRole {
-  constructor(llmService: any) {
+  constructor(llmService: any, customPrompt?: string, workDirManager?: WorkDirManager) {
     const definition: RoleDefinition = {
       id: 'architect',
       name: '架构师',
@@ -48,42 +49,42 @@ export class Architect extends BaseRole {
         '设计必须可测试',
       ],
       outputFormat: `输出格式要求：
-## 架构概述
-- 整体架构描述
-- 关键设计决策
-
-## 系统组件
-| 组件名 | 类型 | 职责 | 接口 | 依赖 |
-|--------|------|------|------|------|
-
-## 数据流
-- 描述主要数据流
-- 使用 Mermaid 图表（可选）
-
-## 技术栈
-- 前端框架和库
-- 后端框架和库
-- 数据库
-- DevOps 工具
-- 测试框架
-
-## 设计模式
-- 模式名称
-- 应用场景
-- 使用理由
-
-## 技术权衡
-| 决策 | 优点 | 缺点 | 理由 |
-|------|------|------|------|`,
+ ## 架构概述
+ - 整体架构描述
+ - 关键设计决策
+ 
+ ## 系统组件
+ | 组件名 | 类型 | 职责 | 接口 | 依赖 |
+ |--------|------|------|------|------|
+ 
+ ## 数据流
+ - 描述主要数据流
+ - 使用 Mermaid 图表（可选）
+ 
+ ## 技术栈
+ - 前端框架和库
+ - 后端框架和库
+ - 数据库
+ - DevOps 工具
+ - 测试框架
+ 
+ ## 设计模式
+ - 模式名称
+ - 应用场景
+ - 使用理由
+ 
+ ## 技术权衡
+ | 决策 | 优点 | 缺点 | 理由 |
+ |------|------|------|------|`,
       systemPrompt: '',
       temperature: 0.6,
       maxTokens: 5000,
     };
 
-    super(definition, llmService);
+    super(definition, llmService, customPrompt, workDirManager);
   }
 
-  protected buildTaskPrompt(task: Task, context: ExecutionContext): string {
+  protected async buildTaskPromptImpl(task: Task, context: ExecutionContext): Promise<string> {
     const sections: string[] = [];
 
     sections.push(`# 架构设计任务: ${task.title}`);

@@ -11,6 +11,7 @@ import { Architect } from './architect.js';
 import { Developer } from './developer.js';
 import { Tester } from './tester.js';
 import { DocWriter } from './doc-writer.js';
+import { WorkDirManager } from '../core/work-dir-manager.js';
 
 /**
  * 角色工厂
@@ -45,19 +46,20 @@ export class RoleFactory {
    */
   static createRole(
     roleType: string,
-    llmService: LLMService
+    llmService: LLMService,
+    workDirManager?: WorkDirManager
   ): BaseRole {
     switch (roleType) {
       case 'product-manager':
-        return new ProductManager(llmService);
+        return new ProductManager(llmService, undefined, workDirManager);
       case 'architect':
-        return new Architect(llmService);
+        return new Architect(llmService, undefined, workDirManager);
       case 'developer':
-        return new Developer(llmService);
+        return new Developer(llmService, undefined, workDirManager);
       case 'tester':
-        return new Tester(llmService);
+        return new Tester(llmService, undefined, workDirManager);
       case 'doc-writer':
-        return new DocWriter(llmService);
+        return new DocWriter(llmService, undefined, workDirManager);
       default:
         throw new Error(`未知的角色类型: ${roleType}`);
     }

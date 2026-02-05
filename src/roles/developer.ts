@@ -6,13 +6,14 @@ import type {
   Message,
   LLMResponse,
 } from '../types/index.js';
+import { WorkDirManager } from '../core/work-dir-manager.js';
 
 /**
  * 开发者角色
  * 负责编写代码、实现功能和代码审查
  */
 export class Developer extends BaseRole {
-  constructor(llmService: any) {
+  constructor(llmService: any, customPrompt?: string, workDirManager?: WorkDirManager) {
     const definition: RoleDefinition = {
       id: 'developer',
       name: '开发者',
@@ -48,34 +49,34 @@ export class Developer extends BaseRole {
       ],
       outputFormat: `输出格式要求：
 
-## 代码实现
-\`\`\`language
-// 代码内容
-\`\`\`
+ ## 代码实现
+ \`\`\`language
+ // 代码内容
+ \`\`\`
 
-## 测试代码
-\`\`\`language
-// 测试代码
-\`\`\`
+ ## 测试代码
+ \`\`\`language
+ // 测试代码
+ \`\`\`
 
-## 说明
-- 实现思路
-- 关键决策
-- 注意事项
+ ## 说明
+ - 实现思路
+ - 关键决策
+ - 注意事项
 
-## 变更说明
-- 修改的文件
-- 新增的文件
-- 破坏性变更（如有）`,
+ ## 变更说明
+ - 修改的文件
+ - 新增的文件
+ - 破坏性变更（如有）`,
       systemPrompt: '',
-      temperature: 0.3, // 代码生成需要较低的温度以保持一致性
+      temperature: 0.3,
       maxTokens: 6000,
     };
 
-    super(definition, llmService);
+    super(definition, llmService, customPrompt, workDirManager);
   }
 
-  protected buildTaskPrompt(task: Task, context: ExecutionContext): string {
+  protected async buildTaskPromptImpl(task: Task, context: ExecutionContext): Promise<string> {
     const sections: string[] = [];
 
     sections.push(`# 开发任务: ${task.title}`);

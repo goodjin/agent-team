@@ -6,13 +6,14 @@ import type {
   Message,
   LLMResponse,
 } from '../types/index.js';
+import { WorkDirManager } from '../core/work-dir-manager.js';
 
 /**
  * 测试工程师角色
  * 负责测试策略设计、测试用例编写和测试执行
  */
 export class Tester extends BaseRole {
-  constructor(llmService: any) {
+  constructor(llmService: any, customPrompt?: string, workDirManager?: WorkDirManager) {
     const definition: RoleDefinition = {
       id: 'tester',
       name: '测试工程师',
@@ -48,39 +49,39 @@ export class Tester extends BaseRole {
       ],
       outputFormat: `输出格式要求：
 
-## 测试策略
-- 测试范围
-- 测试方法
-- 测试工具
-- 测试环境
+ ## 测试策略
+ - 测试范围
+ - 测试方法
+ - 测试工具
+ - 测试环境
 
-## 测试用例
-| ID | 场景 | 前置条件 | 测试步骤 | 预期结果 | 优先级 |
-|----|------|----------|----------|----------|--------|
+ ## 测试用例
+ | ID | 场景 | 前置条件 | 测试步骤 | 预期结果 | 优先级 |
+ |----|------|----------|----------|----------|--------|
 
-## 自动化测试代码
-\`\`\`language
-// 测试代码
-\`\`\`
+ ## 自动化测试代码
+ \`\`\`language
+ // 测试代码
+ \`\`\`
 
-## 测试数据
-- 正常数据
-- 边界数据
-- 异常数据
+ ## 测试数据
+ - 正常数据
+ - 边界数据
+ - 异常数据
 
-## 性能指标
-- 响应时间要求
-- 并发要求
-- 资源占用要求`,
+ ## 性能指标
+ - 响应时间要求
+ - 并发要求
+ - 资源占用要求`,
       systemPrompt: '',
       temperature: 0.5,
       maxTokens: 5000,
     };
 
-    super(definition, llmService);
+    super(definition, llmService, customPrompt, workDirManager);
   }
 
-  protected buildTaskPrompt(task: Task, context: ExecutionContext): string {
+  protected async buildTaskPromptImpl(task: Task, context: ExecutionContext): Promise<string> {
     const sections: string[] = [];
 
     sections.push(`# 测试任务: ${task.title}`);

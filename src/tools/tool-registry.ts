@@ -1,5 +1,6 @@
 import { EventEmitter } from 'eventemitter3';
 import type { ToolDefinition, ToolResult, AgentEvent, AgentEventData } from '../types/index.js';
+import { WorkDirManager } from '../core/work-dir-manager.js';
 import { ReadFileTool } from './file-tools.js';
 import { WriteFileTool } from './file-tools.js';
 import { SearchFilesTool } from './file-tools.js';
@@ -22,9 +23,11 @@ import { BaseTool } from './base.js';
 export class ToolRegistry extends EventEmitter {
   private tools: Map<string, BaseTool> = new Map();
   private categories: Map<string, Set<string>> = new Map();
+  private workDirManager: WorkDirManager;
 
-  constructor() {
+  constructor(workDirManager: WorkDirManager) {
     super();
+    this.workDirManager = workDirManager;
     this.registerDefaultTools();
   }
 
@@ -201,11 +204,11 @@ export class ToolRegistry extends EventEmitter {
    * 注册默认工具集
    */
   private registerDefaultTools(): void {
-    this.register(new ReadFileTool());
-    this.register(new WriteFileTool());
-    this.register(new SearchFilesTool());
-    this.register(new DeleteFileTool());
-    this.register(new ListDirectoryTool());
+    this.register(new ReadFileTool(this.workDirManager));
+    this.register(new WriteFileTool(this.workDirManager));
+    this.register(new SearchFilesTool(this.workDirManager));
+    this.register(new DeleteFileTool(this.workDirManager));
+    this.register(new ListDirectoryTool(this.workDirManager));
 
     this.register(new GitStatusTool());
     this.register(new GitCommitTool());

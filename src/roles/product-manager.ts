@@ -13,8 +13,10 @@ import type {
  * 产品经理角色
  * 负责需求分析、产品设计和功能规划
  */
+import { WorkDirManager } from '../core/work-dir-manager.js';
+
 export class ProductManager extends BaseRole {
-  constructor(llmService: any) {
+  constructor(llmService: any, customPrompt?: string, workDirManager?: WorkDirManager) {
     const definition: RoleDefinition = {
       id: 'product-manager',
       name: '产品经理',
@@ -45,22 +47,22 @@ export class ProductManager extends BaseRole {
         '输出必须结构化',
       ],
       outputFormat: `输出格式要求：
-1. 需求概述（2-3句话）
-2. 功能列表（使用表格形式）
-3. 用户故事（使用标准格式：作为...我想要...以便...）
-4. 验收标准（Given-When-Then格式）
-5. 优先级排序（MoSCoW方法）
-6. 风险评估（影响程度+发生概率）
-7. 工作量估算（故事点）`,
+ 1. 需求概述（2-3句话）
+ 2. 功能列表（使用表格形式）
+ 3. 用户故事（使用标准格式：作为...我想要...以便...）
+ 4. 验收标准（Given-When-Then格式）
+ 5. 优先级排序（MoSCoW方法）
+ 6. 风险评估（影响程度+发生概率）
+ 7. 工作量估算（故事点）`,
       systemPrompt: '',
       temperature: 0.7,
       maxTokens: 4000,
     };
 
-    super(definition, llmService);
+    super(definition, llmService, customPrompt, workDirManager);
   }
 
-  protected buildTaskPrompt(task: Task, context: ExecutionContext): string {
+  protected async buildTaskPromptImpl(task: Task, context: ExecutionContext): Promise<string> {
     const sections: string[] = [];
 
     sections.push(`# 任务: ${task.title}`);

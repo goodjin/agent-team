@@ -21,6 +21,7 @@ import { getLLMConfigManager, type ConfigValidationResult } from '../services/ll
 import { AgentMgr } from './agent-mgr.js';
 import { EventSystem } from './events.js';
 import { WorkflowEngine } from './workflow-engine.js';
+import { WorkDirManager } from './work-dir-manager.js';
 
 /**
  * 核心 Project Agent 类
@@ -37,6 +38,7 @@ export class ProjectAgent {
   public workflowEngine: WorkflowEngine;
   private promptConfigPaths: string[] = [];
   private llmConfigPath: string | null = null;
+  private workDirManager: WorkDirManager;
 
   constructor(
     config: ProjectConfig,
@@ -46,7 +48,8 @@ export class ProjectAgent {
     }
   ) {
     this.config = config;
-    this.toolRegistry = new ToolRegistry();
+    this.workDirManager = new WorkDirManager();
+    this.toolRegistry = new ToolRegistry(this.workDirManager);
     this.eventSystem = new EventSystem();
     this.agentMgr = new AgentMgr(config.projectId || 'default', this.eventSystem);
     this.taskManager = new TaskManager(config, this.toolRegistry);
@@ -68,6 +71,10 @@ export class ProjectAgent {
 
     // 设置事件转发
     this.setupEventForwarding();
+  }
+
+  getWorkDirManager(): WorkDirManager {
+    return this.workDirManager;
   }
 
   /**

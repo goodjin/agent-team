@@ -6,13 +6,14 @@ import type {
   Message,
   LLMResponse,
 } from '../types/index.js';
+import { WorkDirManager } from '../core/work-dir-manager.js';
 
 /**
  * 文档编写者角色
  * 负责编写和更新项目文档
  */
 export class DocWriter extends BaseRole {
-  constructor(llmService: any) {
+  constructor(llmService: any, customPrompt?: string, workDirManager?: WorkDirManager) {
     const definition: RoleDefinition = {
       id: 'doc-writer',
       name: '文档编写者',
@@ -46,40 +47,40 @@ export class DocWriter extends BaseRole {
       ],
       outputFormat: `输出格式要求：
 
-## [文档标题]
+ ## [文档标题]
 
-### 概述
-- 简要描述（2-3句话）
+ ### 概述
+ - 简要描述（2-3句话）
 
-### 功能/内容
-- 主要内容
-- 使用场景
-- 关键特性
+ ### 功能/内容
+ - 主要内容
+ - 使用场景
+ - 关键特性
 
-### 使用方法
-\`\`\`language
-// 示例代码
-\`\`\`
+ ### 使用方法
+ \`\`\`language
+ // 示例代码
+ \`\`\`
 
-### 参数说明
-| 参数 | 类型 | 说明 | 必填 |
-|------|------|------|------|
+ ### 参数说明
+ | 参数 | 类型 | 说明 | 必填 |
+ |------|------|------|------|
 
-### 注意事项
-- 重要提示
-- 常见问题
+ ### 注意事项
+ - 重要提示
+ - 常见问题
 
-### 相关文档
-- 链接到其他文档`,
+ ### 相关文档
+ - 链接到其他文档`,
       systemPrompt: '',
       temperature: 0.6,
       maxTokens: 5000,
     };
 
-    super(definition, llmService);
+    super(definition, llmService, customPrompt, workDirManager);
   }
 
-  protected buildTaskPrompt(task: Task, context: ExecutionContext): string {
+  protected async buildTaskPromptImpl(task: Task, context: ExecutionContext): Promise<string> {
     const sections: string[] = [];
 
     sections.push(`# 文档任务: ${task.title}`);

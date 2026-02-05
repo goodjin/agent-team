@@ -4,6 +4,7 @@ import { TaskOrchestrator } from '../core/task-orchestrator.js';
 import { createAgentRouter } from './routes/agents.js';
 import { createWorkflowRouter } from './routes/workflows.js';
 import { createProjectRouter } from './routes/projects.js';
+import { createWorkDirRouter } from './routes/work-dir.js';
 import type {
   Task,
   TaskType,
@@ -25,6 +26,9 @@ export function createApiRoutes(agent: ProjectAgent): Router {
 
   // 项目管理路由
   router.use('/projects', createProjectRouter(agent.getTaskManager(), agent.getAgentMgr()));
+
+  // 工作目录管理路由
+  router.use('/', createWorkDirRouter(agent.getWorkDirManager()));
 
   // ==================== 对话式任务创建 ====================
   
