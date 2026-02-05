@@ -8,6 +8,8 @@ import { createProjectRouter } from '../src/server/routes/projects.js';
 import { createTaskRouter } from '../src/server/routes/tasks.js';
 import { createRoleRouter } from '../src/server/routes/roles.js';
 import { createAgentRouter } from '../src/server/routes/agents.js';
+import { AgentMgr } from '../src/core/agent-mgr.js';
+import { EventSystem } from '../src/core/events.js';
 
 describe('Server Routes', () => {
   describe('Health Router', () => {
@@ -137,7 +139,9 @@ describe('Server Routes', () => {
 
   describe('Agent Router', () => {
     it('should list agents', async () => {
-      const router = createAgentRouter();
+      const eventSystem = new EventSystem();
+      const agentMgr = new AgentMgr('test-project', eventSystem);
+      const router = createAgentRouter(agentMgr);
       const app = express();
       app.use(express.json());
       app.use('/api/agents', router);
