@@ -32,6 +32,7 @@ import { ErrorDisplay } from '../utils/error-display.js';
 import { WorkDirManager } from './work-dir-manager.js';
 import { TaskPersistence } from './task-persistence.js';
 import { ProgressTracker } from './progress-tracker.js';
+import { AutoScheduler } from './auto-scheduler.js';
 
 /**
  * 任务管理器
@@ -47,6 +48,7 @@ export class TaskManager extends EventEmitter {
   private workDirManager: WorkDirManager;
   private persistence: TaskPersistence;
   private progressTracker: ProgressTracker;
+  private autoScheduler: AutoScheduler;
 
   constructor(projectConfig: ProjectConfig, toolRegistry: ToolRegistry) {
     super();
@@ -70,9 +72,18 @@ export class TaskManager extends EventEmitter {
       maxBackupCount: 5,
     });
     this.progressTracker = new ProgressTracker();
+    this.autoScheduler = new AutoScheduler(
+      {
+        maxConcurrentTasks: 3,
+        checkIntervalMs: 1000,
+        priorityEnabled: true,
+      },
+      this
+    );
 
     this.persistence.setTaskGetter(() => this.getAllTasks().map(t => this.toPersistedTask(t)));
     this.persistence.startAutoSave();
+    this.autoScheduler.start();
 
     this.restoreTasks();
   }
@@ -238,7 +249,10 @@ export class TaskManager extends EventEmitter {
 
     this.tasks.set(task.id, task);
 
-    this.persistence.saveTask(this.toPersistedTask(task));
+    // 持久化任务（异步，不阻塞返回）
+    this.persistence.saveTask(this.toPersistedTask(task)).catch(err => {
+      console.error(`[TaskManager] Failed to persist task ${task.id}:`, err.message);
+    });
 
     this.progressTracker.checkpoint(
       task.id,
@@ -396,6 +410,36 @@ export class TaskManager extends EventEmitter {
 
     task.result = result;
     task.updatedAt = new Date();
+
+    // 保存任务成果
+    if (result.success && result.data) {
+      task.output = {
+        files: result.data.files || [],
+        summary: result.data.summary,
+        webPreview: result.data.webPreview,
+        metrics: result.data.metrics,
+      };
+
+      // 将成果文件写入 workDir/output/ 目录
+      if (task.input?.workDirState?.structure?.output && result.data.files) {
+        for (const file of result.data.files) {
+          if (file.content) {
+            const filePath = path.join(
+              task.input.workDirState.structure.output,
+              file.path
+            );
+            try {
+              await this.toolRegistry.execute('write-file', {
+                filePath,
+                content: file.content,
+              });
+            } catch (err) {
+              console.error(`[TaskManager] Failed to write output file ${filePath}:`, err);
+            }
+          }
+        }
+      }
+    }
 
     await this.persistence.saveTask(this.toPersistedTask(task));
   }
