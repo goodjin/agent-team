@@ -23,6 +23,7 @@ export interface LLMProviderConfig {
   provider: LLMProvider;
   apiKey: string;
   baseURL?: string;
+  weight: number;
   models: {
     [key: string]: {
       model: string;
@@ -32,6 +33,8 @@ export interface LLMProviderConfig {
     };
   };
   enabled?: boolean;
+  timeout?: number;
+  maxRetries?: number;
 }
 
 /**
@@ -63,20 +66,21 @@ export interface LLMSettingsFile {
  * 配置验证结果
  */
 export interface ConfigValidationResult {
-  isValid: boolean;
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
   summary: {
     totalProviders: number;
     enabledProviders: number;
-    configuredProviders: number;
     readyToUse: number;
   };
-  providers: {
+  providers: Array<{
     name: string;
     enabled: boolean;
-    configured: boolean;
+    hasApiKey: boolean;
+    weight: number;
     readyToUse: boolean;
-    message: string;
-  }[];
+  }>;
   recommendations: string[];
 }
 
@@ -100,7 +104,7 @@ export class LLMConfigManager {
       if (ext === '.yaml' || ext === '.yml') {
         // YAML 格式（统一配置文件）
         const yamlConfig = yaml.load(content) as any;
-        
+
         // 转换为 LLMSettingsFile 格式
         if (yamlConfig.llm) {
           this.settings = {
@@ -110,12 +114,12 @@ export class LLMConfigManager {
             roleMapping: yamlConfig.llm.roleMapping || {},
             fallbackOrder: yamlConfig.llm.fallbackOrder || [],
           };
-          
+
           // 转换提供商配置
           for (const [name, provider] of Object.entries(yamlConfig.llm.providers || {})) {
             const p = provider as any;
             const models: any = {};
-            
+
             // 转换模型配置
             for (const [modelKey, model] of Object.entries(p.models || {})) {
               const m = model as any;
@@ -126,19 +130,39 @@ export class LLMConfigManager {
                 description: m.description,
               };
             }
-            
+
             this.settings.providers[name] = {
               name: p.name || name,
               provider: p.provider || 'openai',
               apiKey: p.apiKey || '',
               baseURL: p.baseURL,
+              weight: p.weight || 0,
               models,
               enabled: p.enabled !== false, // 默认启用
+              timeout: p.timeout,
+              maxRetries: p.maxRetries,
             };
           }
         } else {
           // 如果不是统一配置格式，尝试直接解析
           this.settings = yamlConfig as LLMSettingsFile;
+
+          // 转换 roleMapping 格式（provider -> providerName, model -> modelName）
+          if (this.settings.roleMapping) {
+            const convertedMapping: RoleProviderMapping = {};
+            for (const [role, mapping] of Object.entries(this.settings.roleMapping)) {
+              const m = mapping as any;
+              if (m.provider) {
+                convertedMapping[role] = {
+                  providerName: m.provider,
+                  modelName: m.model,
+                };
+              } else {
+                convertedMapping[role] = mapping;
+              }
+            }
+            this.settings.roleMapping = convertedMapping;
+          }
         }
       } else {
         // JSON 格式（旧格式）
@@ -426,6 +450,80 @@ export class LLMConfigManager {
   }
 
   /**
+   * 获取可用的服务商列表
+   * 过滤掉 weight=0 或 apiKey 为空的服务商
+   */
+  getAvailableProviders(): LLMProviderConfig[] {
+    if (!this.settings) {
+      throw new Error('Config not loaded');
+    }
+
+    return Object.values(this.settings.providers).filter(
+      (provider) =>
+        provider.enabled !== false &&
+        provider.weight > 0 &&
+        provider.apiKey !== '' &&
+        !provider.apiKey.startsWith('${')
+    );
+  }
+
+  /**
+   * 按权重随机选择服务商
+   */
+  selectProvider(): LLMProviderConfig {
+    const available = this.getAvailableProviders();
+
+    if (available.length === 0) {
+      throw new Error('No available providers');
+    }
+
+    // 计算总权重
+    const totalWeight = available.reduce((sum, p) => sum + p.weight, 0);
+
+    // 随机选择
+    let random = Math.random() * totalWeight;
+
+    for (const provider of available) {
+      random -= provider.weight;
+      if (random <= 0) {
+        return provider;
+      }
+    }
+
+    // 兜底返回第一个
+    return available[0];
+  }
+
+  /**
+   * 获取角色专属服务商
+   * 如果角色配置的服务商不可用，返回 null
+   */
+  getProviderForRole(role: string): LLMProviderConfig | null {
+    if (!this.settings) {
+      throw new Error('Config not loaded');
+    }
+
+    const mapping = this.settings.roleMapping?.[role];
+    if (!mapping) {
+      return null;
+    }
+
+    const mappingItem = Array.isArray(mapping) ? mapping[0] : mapping;
+    const provider = this.getProvider(mappingItem.providerName);
+
+    if (!provider) {
+      return null;
+    }
+
+    // 检查是否可用
+    if (!provider.enabled || provider.weight === 0 || provider.apiKey === '' || provider.apiKey.startsWith('${')) {
+      return null;
+    }
+
+    return provider;
+  }
+
+  /**
    * 获取故障转移顺序
    */
   getFallbackOrder(): string[] {
@@ -501,84 +599,88 @@ export class LLMConfigManager {
   async validateConfig(): Promise<ConfigValidationResult> {
     if (!this.settings) {
       return {
-        isValid: false,
+        valid: false,
+        errors: ['Config not loaded'],
+        warnings: [],
         summary: {
           totalProviders: 0,
           enabledProviders: 0,
-          configuredProviders: 0,
           readyToUse: 0,
         },
         providers: [],
-        recommendations: ['请先加载配置文件'],
+        recommendations: ['Please load config file first'],
       };
     }
 
-    const providers: ConfigValidationResult['providers'] = [];
+    const errors: string[] = [];
+    const warnings: string[] = [];
     const recommendations: string[] = [];
+    const providerDetails: Array<any> = [];
 
-    let enabledCount = 0;
-    let configuredCount = 0;
-    let readyToUseCount = 0;
+    let totalProviders = 0;
+    let enabledProviders = 0;
+    let readyToUse = 0;
 
-    for (const [name, provider] of Object.entries(this.settings.providers)) {
-      const isEnabled = this.isEnabled(name);
-      const isApiKeyValid: boolean = this.hasValidApiKey(name);
-      // 已配置：有 API Key 且不是环境变量占位符
-      const isConfigured: boolean = !!provider.apiKey && 
-        provider.apiKey.trim() !== '' && 
-        !provider.apiKey.startsWith('${') &&
-        provider.apiKey !== 'your_' &&
-        !provider.apiKey.startsWith('sk-xxxxx');
+    for (const [key, provider] of Object.entries(this.settings.providers)) {
+      totalProviders++;
 
-      if (isEnabled) enabledCount++;
-      if (isConfigured) configuredCount++;
-      if (isApiKeyValid) readyToUseCount++;
+      const hasApiKey = provider.apiKey !== '' && !provider.apiKey.startsWith('${');
+      const isEnabled = provider.enabled !== false;
+      const hasWeight = provider.weight > 0;
+      const isReady = isEnabled && hasApiKey && hasWeight;
 
-      let message = '';
-      if (!isEnabled) {
-        message = '已禁用';
-      } else if (!isConfigured) {
-        message = '需要配置 API Key';
-        if (!recommendations.includes(`请配置 ${provider.name} 的 API Key`)) {
-          recommendations.push(`请配置 ${provider.name} 的 API Key`);
-        }
-      } else if (!isApiKeyValid) {
-        message = 'API Key 无效';
-        recommendations.push(`请检查 ${provider.name} 的 API Key 是否正确`);
-      } else {
-        message = '已配置并可用';
+      if (isEnabled) {
+        enabledProviders++;
       }
 
-      providers.push({
+      if (isReady) {
+        readyToUse++;
+      }
+
+      providerDetails.push({
         name: provider.name,
         enabled: isEnabled,
-        configured: isConfigured,
-        readyToUse: isApiKeyValid,
-        message,
+        hasApiKey,
+        weight: provider.weight,
+        readyToUse: isReady,
       });
+
+      // 检查错误
+      if (isEnabled && !hasApiKey) {
+        warnings.push(`${provider.name}: enabled but missing API key`);
+      }
+
+      if (isEnabled && provider.weight === 0) {
+        warnings.push(`${provider.name}: enabled but weight is 0`);
+      }
+
+      // 检查模型配置
+      if (Object.keys(provider.models).length === 0) {
+        errors.push(`${provider.name}: no models configured`);
+      }
     }
 
-    // 检查默认服务商
-    const defaultProvider = this.settings.providers[this.settings.defaultProvider];
-    if (defaultProvider && !this.hasValidApiKey(this.settings.defaultProvider)) {
-      recommendations.push(`默认服务商 ${defaultProvider.name} 没有有效的 API Key，建议更换或配置`);
+    // 建议
+    if (readyToUse === 0) {
+      recommendations.push('No providers ready to use. Please configure at least one provider with API key.');
+    } else if (readyToUse === 1) {
+      recommendations.push('Only one provider available. Consider configuring backup providers.');
     }
 
-    // 检查是否有任何可用的服务商
-    if (readyToUseCount === 0) {
-      recommendations.push('没有可用的 LLM 服务商，请至少配置一个服务商');
-      recommendations.push('参考 .env.example 创建 .env 文件并配置 API Key');
+    if (readyToUse < totalProviders / 2) {
+      recommendations.push('More than half of providers are disabled. Consider enabling more providers for redundancy.');
     }
 
     return {
-      isValid: readyToUseCount > 0,
+      valid: errors.length === 0 && readyToUse > 0,
+      errors,
+      warnings,
       summary: {
-        totalProviders: Object.keys(this.settings.providers).length,
-        enabledProviders: enabledCount,
-        configuredProviders: configuredCount,
-        readyToUse: readyToUseCount,
+        totalProviders,
+        enabledProviders,
+        readyToUse,
       },
-      providers,
+      providers: providerDetails,
       recommendations,
     };
   }

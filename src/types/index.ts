@@ -11,7 +11,7 @@ export * from './errors.js';
 export * from './output.js';
 
 // LLM 提供商类型
-export type LLMProvider = 'anthropic' | 'openai' | 'ollama' | 'custom';
+export type LLMProvider = 'anthropic' | 'openai' | 'ollama' | 'bigmodel' | 'custom';
 
 // LLM 配置
 export interface LLMConfig {

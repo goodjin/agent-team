@@ -289,6 +289,27 @@ function initModals() {
         });
     }
     
+    // 所有模态框的关闭按钮和点击外部关闭
+    document.querySelectorAll('.modal-close').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const modal = btn.closest('.modal');
+            if (modal) {
+                modal.classList.remove('active');
+            }
+        });
+    });
+    
+    // 点击模态框外部关闭
+    document.querySelectorAll('.modal').forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) {
+                modal.classList.remove('active');
+            }
+        });
+    });
+    
     // 创建智能体模态框
     const createAgentModal = document.getElementById('modal-create-agent');
     if (createAgentModal) {
@@ -686,6 +707,21 @@ async function createAgent(form) {
     }
 }
 
+// 显示创建工作流模态框
+window.showCreateWorkflowModal = function() {
+    const modal = document.getElementById('modal-create-workflow');
+    if (modal) {
+        modal.classList.add('active');
+    } else {
+        showToast('工作流创建功能开发中', 'info');
+    }
+};
+
+// 创建自定义工作流
+window.createCustomWorkflow = function() {
+    showToast('工作流创建功能开发中', 'info');
+};
+
 // 加载任务
 async function loadTasks() {
     try {
@@ -829,6 +865,9 @@ window.showTaskDetail = function(taskId) {
     document.getElementById('page-task-detail').classList.add('active');
     updateBreadcrumb('task-detail');
     loadTaskDetail(taskId);
+    // 订阅 SSE 实时更新
+    subscribeTaskEvents(taskId);
+    subscribeAgentEvents(taskId);
 };
 
 // 加载任务详情
@@ -864,6 +903,9 @@ async function loadTaskDetail(taskId) {
         
         // 显示工具调用
         renderTaskTools(task);
+        
+        // 显示任务成果
+        loadTaskOutput(taskId);
         
     } catch (error) {
         console.error('加载任务详情失败:', error);
@@ -918,7 +960,7 @@ function renderTaskProgress(task) {
     const subtasksList = document.getElementById('subtasks-list');
     
     if (progressFill && progressText) {
-        const progress = task.progress || 0;
+        const progress = task.progress?.percentage || 0;
         progressFill.style.width = `${progress}%`;
         progressText.textContent = `${progress}%`;
     }
@@ -953,6 +995,46 @@ function renderTaskMessages(task) {
     `).join('');
     
     container.scrollTop = container.scrollHeight;
+}
+
+function expandAllMessages() {
+    const container = document.getElementById('task-messages');
+    if (!container) return;
+    
+    const messages = container.querySelectorAll('.message-content');
+    messages.forEach(msg => {
+        msg.style.whiteSpace = 'pre-wrap';
+    });
+    
+    showToast('已展开全部消息', 'info');
+}
+
+function sendTaskMessage() {
+    const input = document.getElementById('task-message-input');
+    const message = input?.value.trim();
+    
+    if (!message) {
+        showToast('请输入消息', 'warning');
+        return;
+    }
+    
+    if (!state.currentTaskId) {
+        showToast('请先选择一个任务', 'warning');
+        return;
+    }
+    
+    input.value = '';
+    
+    apiCall(`/tasks/${state.currentTaskId}/chat`, {
+        method: 'POST',
+        body: JSON.stringify({ message }),
+    }).then(() => {
+        showToast('消息已发送', 'success');
+        loadTaskDetail(state.currentTaskId);
+    }).catch(error => {
+        console.error('发送消息失败:', error);
+        showToast('发送失败: ' + (error.message || '未知错误'), 'error');
+    });
 }
 
 function renderExecutionRecords(task) {
@@ -1311,10 +1393,16 @@ window.backToAgents = function() {
 
 // 加载项目
 async function loadProjects() {
+    console.log('[loadProjects] 开始加载项目');
     try {
         showLoading(true);
+        console.log('[loadProjects] 显示加载状态');
+        
         const data = await apiCall('/projects');
+        console.log('[loadProjects] API返回:', data);
+        
         state.projects = data.data || [];
+        console.log('[loadProjects] 项目数量:', state.projects.length);
 
         if (state.projects.length > 0) {
             const current = state.projects[0];
@@ -1326,11 +1414,12 @@ async function loadProjects() {
         }
 
         renderProjectsGrid(state.projects);
-        showLoading(false);
     } catch (error) {
-        console.error('加载项目失败:', error);
-        showToast('加载项目失败', 'error');
+        console.error('[loadProjects] 加载项目失败:', error);
+        showToast('加载项目失败: ' + (error.message || '未知错误'), 'error');
+    } finally {
         showLoading(false);
+        console.log('[loadProjects] 隐藏加载状态');
     }
 }
 
@@ -2033,6 +2122,83 @@ function renderSettingsRules() {
     container.innerHTML = '<p style="color: var(--text-secondary);">暂无规则配置</p>';
 }
 
+// 导出报告
+window.exportReport = function() {
+    showToast('报告导出功能开发中', 'info');
+};
+
+// 导出所有数据
+window.exportAllData = function() {
+    try {
+        const data = {
+            tasks: state.tasks,
+            agents: state.agents,
+            projects: state.projects,
+            exportedAt: new Date().toISOString(),
+        };
+        
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `agent-team-backup-${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        
+        showToast('数据导出成功', 'success');
+    } catch (error) {
+        console.error('导出数据失败:', error);
+        showToast('导出失败: ' + (error.message || '未知错误'), 'error');
+    }
+};
+
+// 导入数据
+window.importData = function() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    
+    input.onchange = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        
+        try {
+            const text = await file.text();
+            const data = JSON.parse(text);
+            
+            if (data.tasks && Array.isArray(data.tasks)) {
+                showToast(`导入了 ${data.tasks.length} 个任务`, 'success');
+            }
+            
+            loadDashboard();
+            showToast('数据导入成功', 'success');
+        } catch (error) {
+            console.error('导入数据失败:', error);
+            showToast('导入失败: ' + (error.message || '文件格式错误'), 'error');
+        }
+    };
+    
+    input.click();
+};
+
+// 清除所有数据
+window.clearAllData = function() {
+    if (!confirm('确定要清除所有数据吗？此操作不可恢复！')) {
+        return;
+    }
+    
+    try {
+        localStorage.clear();
+        showToast('本地数据已清除，页面将刷新...', 'success');
+        setTimeout(() => {
+            window.location.reload();
+        }, 1500);
+    } catch (error) {
+        console.error('清除数据失败:', error);
+        showToast('清除失败: ' + (error.message || '未知错误'), 'error');
+    }
+};
+
 // 自动刷新
 function startAutoRefresh() {
     setInterval(() => {
@@ -2048,6 +2214,112 @@ function startAutoRefresh() {
                 break;
         }
     }, 30000); // 每30秒刷新
+}
+
+// SSE 实时更新管理
+let activeTaskEventSource = null;
+let activeAgentEventSource = null;
+
+/**
+ * 订阅任务实时更新 (SSE)
+ */
+function subscribeTaskEvents(taskId) {
+    // 关闭之前的连接
+    if (activeTaskEventSource) {
+        activeTaskEventSource.close();
+        activeTaskEventSource = null;
+    }
+
+    try {
+        const es = new EventSource(`/api/tasks/${taskId}/events`);
+        activeTaskEventSource = es;
+
+        es.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleTaskSseEvent(data);
+            } catch (e) {
+                console.warn('Failed to parse task SSE event:', e);
+            }
+        };
+
+        es.onerror = () => {
+            console.warn('Task SSE connection error for:', taskId);
+        };
+    } catch (e) {
+        console.warn('EventSource not supported or failed:', e);
+    }
+}
+
+/**
+ * 订阅 Agent 实时更新 (SSE)
+ */
+function subscribeAgentEvents(taskId) {
+    if (activeAgentEventSource) {
+        activeAgentEventSource.close();
+        activeAgentEventSource = null;
+    }
+
+    try {
+        const es = new EventSource(`/api/tasks/${taskId}/agents/events`);
+        activeAgentEventSource = es;
+
+        es.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleAgentSseEvent(data);
+            } catch (e) {
+                console.warn('Failed to parse agent SSE event:', e);
+            }
+        };
+
+        es.onerror = () => {
+            console.warn('Agent SSE connection error for task:', taskId);
+        };
+    } catch (e) {
+        console.warn('EventSource not supported or failed:', e);
+    }
+}
+
+/**
+ * 处理任务 SSE 事件
+ */
+function handleTaskSseEvent(data) {
+    if (data.type === 'connected') return;
+
+    // 如果当前在任务详情页，刷新详情
+    if (state.currentPage === 'task-detail' && state.currentTaskId) {
+        loadTaskDetail(state.currentTaskId);
+    }
+
+    // 始终更新任务列表数据
+    loadTasks().catch(() => {});
+}
+
+/**
+ * 处理 Agent SSE 事件
+ */
+function handleAgentSseEvent(data) {
+    if (data.type === 'connected') return;
+
+    // 如果当前在任务详情页，刷新 agent 信息
+    if (state.currentPage === 'task-detail') {
+        loadTaskDetail(state.currentTaskId);
+    }
+}
+
+/**
+ * 停止所有 SSE 连接
+ */
+function stopSseSubscriptions() {
+    if (activeTaskEventSource) {
+        activeTaskEventSource.close();
+        activeTaskEventSource = null;
+    }
+    if (activeAgentEventSource) {
+        activeAgentEventSource.close();
+        activeAgentEventSource = null;
+    }
 }
 
 // 刷新仪表板
@@ -2180,3 +2452,224 @@ window.showCreateAgentModal = showCreateAgentModal;
 window.refreshAgents = refreshAgents;
 window.refreshDashboard = refreshDashboard;
 window.switchToPage = switchToPage;
+
+// Task Output Functions
+window.refreshTaskOutput = refreshTaskOutput;
+window.loadTaskOutput = loadTaskOutput;
+window.loadFilePreview = loadFilePreview;
+
+let currentOutputTree = [];
+let currentSelectedFile = null;
+
+async function loadTaskOutput(taskId) {
+    const container = document.getElementById('output-file-tree');
+    const preview = document.getElementById('output-preview');
+    
+    if (!container) return;
+    
+    try {
+        const data = await apiCall(`/tasks/${taskId}/output`);
+        const output = data.data;
+        
+        if (!output || !output.files || output.files.length === 0) {
+            container.innerHTML = '<div class="preview-empty" style="padding: 1rem;">暂无成果文件</div>';
+            if (preview) {
+                preview.innerHTML = '<div class="preview-empty">暂无成果</div>';
+            }
+            currentOutputTree = [];
+            return;
+        }
+        
+        currentOutputTree = buildFileTree(output.files);
+        renderFileTree(currentOutputTree, container, '');
+        
+    } catch (error) {
+        console.error('加载任务成果失败:', error);
+        container.innerHTML = '<div class="preview-empty" style="padding: 1rem; color: var(--danger-color);">加载失败</div>';
+    }
+}
+
+function buildFileTree(files) {
+    const tree = {};
+    
+    for (const file of files) {
+        const parts = file.path.split('/');
+        let current = tree;
+        
+        for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            const isLast = i === parts.length - 1;
+            
+            if (isLast) {
+                current[part] = { 
+                    ...file, 
+                    type: 'file',
+                    name: part 
+                };
+            } else {
+                if (!current[part]) {
+                    current[part] = { 
+                        type: 'folder', 
+                        name: part,
+                        children: {} 
+                    };
+                }
+                current = current[part].children;
+            }
+        }
+    }
+    
+    return tree;
+}
+
+function renderFileTree(tree, container, prefix = '', depth = 0) {
+    if (!container) return;
+    
+    let html = '';
+    const entries = Object.entries(tree).sort((a, b) => {
+        const aIsFolder = a[1].type === 'folder';
+        const bIsFolder = b[1].type === 'folder';
+        if (aIsFolder && !bIsFolder) return -1;
+        if (!aIsFolder && bIsFolder) return 1;
+        return a[0].localeCompare(b[0]);
+    });
+    
+    for (const [name, node] of entries) {
+        const fullPath = prefix ? `${prefix}/${name}` : name;
+        const isActive = currentSelectedFile === fullPath;
+        
+        if (node.type === 'folder') {
+            html += `
+                <div class="file-tree-item folder" data-path="${fullPath}" onclick="toggleFolder(this)">
+                    <span class="file-icon">📁</span>
+                    <span>${escapeHtml(name)}</span>
+                </div>
+                <div class="file-tree-children" id="folder-${fullPath.replace(/\//g, '-')}" style="display: none;">
+                    ${renderFileTree(node.children || {}, container, fullPath, depth + 1)}
+                </div>
+            `;
+        } else {
+            const icon = getFileIcon(name);
+            html += `
+                <div class="file-tree-item ${isActive ? 'active' : ''}" 
+                     data-path="${fullPath}" 
+                     onclick="selectFile('${escapeHtml(fullPath)}', '${escapeHtml(name)}', '${node.mimeType || ''}')">
+                    <span class="file-icon">${icon}</span>
+                    <span>${escapeHtml(name)}</span>
+                </div>
+            `;
+        }
+    }
+    
+    container.innerHTML = html || '<div class="preview-empty" style="padding: 1rem;">空目录</div>';
+}
+
+function toggleFolder(element) {
+    const path = element.dataset.path;
+    const children = document.getElementById(`folder-${path.replace(/\//g, '-')}`);
+    if (children) {
+        children.style.display = children.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+function getFileIcon(filename) {
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const icons = {
+        'js': '📜', 'ts': '📘', 'jsx': '⚛️', 'tsx': '⚛️',
+        'html': '🌐', 'css': '🎨', 'scss': '🎨',
+        'json': '📋', 'md': '📝', 'txt': '📄',
+        'png': '🖼️', 'jpg': '🖼️', 'svg': '🎨',
+        'py': '🐍', 'java': '☕', 'go': '🔷',
+        'rs': '🦀', 'cpp': '⚙️', 'c': '⚙️',
+        'sh': '💻', 'bash': '💻',
+        'zip': '📦', 'tar': '📦', 'gz': '📦'
+    };
+    return icons[ext] || '📄';
+}
+
+async function selectFile(fullPath, filename, mimeType) {
+    currentSelectedFile = fullPath;
+    
+    const preview = document.getElementById('output-preview');
+    if (!preview) return;
+    
+    // Update active state in tree
+    document.querySelectorAll('.file-tree-item').forEach(item => {
+        item.classList.remove('active');
+    });
+    const activeItem = document.querySelector(`.file-tree-item[data-path="${fullPath}"]`);
+    if (activeItem) {
+        activeItem.classList.add('active');
+    }
+    
+    // Show loading
+    preview.innerHTML = '<div class="preview-loading">加载中...</div>';
+    
+    try {
+        const taskId = state.currentTaskId;
+        const data = await apiCall(`/tasks/${taskId}/output/files/${encodeURIComponent(fullPath)}`);
+        const fileData = data.data;
+        
+        renderFilePreview(fileData, preview, filename);
+        
+    } catch (error) {
+        console.error('加载文件预览失败:', error);
+        preview.innerHTML = `<div class="preview-error">无法加载文件: ${escapeHtml(error.message)}</div>`;
+    }
+}
+
+function renderFilePreview(fileData, container, filename) {
+    if (!fileData || !fileData.preview) {
+        container.innerHTML = '<div class="preview-empty">无法预览此文件</div>';
+        return;
+    }
+    
+    const ext = filename.split('.').pop()?.toLowerCase();
+    const codeExtensions = ['js', 'ts', 'jsx', 'tsx', 'html', 'css', 'scss', 'json', 'md', 'py', 'java', 'go', 'rs', 'cpp', 'c', 'sh', 'bash', 'txt', 'yml', 'yaml'];
+    const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
+    
+    let html = '';
+    
+    if (imageExtensions.includes(ext)) {
+        html = `<img src="${fileData.preview}" alt="${escapeHtml(filename)}" class="preview-image" onerror="this.outerHTML='<div class=preview-error>图片加载失败</div>'">`;
+    } else if (codeExtensions.includes(ext)) {
+        html = `<pre class="preview-code"><code>${escapeHtml(fileData.preview)}</code></pre>`;
+    } else if (ext === 'md') {
+        html = `<div class="preview-markdown">${renderSimpleMarkdown(fileData.preview)}</div>`;
+    } else {
+        html = `<pre class="preview-text">${escapeHtml(fileData.preview)}</pre>`;
+    }
+    
+    container.innerHTML = html;
+}
+
+function renderSimpleMarkdown(text) {
+    if (!text) return '';
+    
+    return text
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`(.+?)`/g, '<code>$1</code>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+        .replace(/\n/g, '<br>');
+}
+
+async function loadFilePreview(taskId, filePath) {
+    // Legacy function kept for compatibility
+    const preview = document.getElementById('output-preview');
+    if (!preview) return;
+    
+    const filename = filePath.split('/').pop();
+    await selectFile(filePath, filename, '');
+}
+
+function refreshTaskOutput() {
+    if (state.currentTaskId) {
+        loadTaskOutput(state.currentTaskId);
+        showToast('已刷新成果列表', 'info');
+    }
+}

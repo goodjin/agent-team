@@ -405,6 +405,27 @@
                         <h3>🛠️ 工具调用记录</h3>
                         <div id="task-tools" class="tools-list"></div>
                     </div>
+                    
+                    <!-- 任务成果 -->
+                    <div class="task-output-section">
+                        <div class="section-header">
+                            <h3>📁 任务成果</h3>
+                            <button class="btn btn-sm btn-secondary" onclick="refreshTaskOutput()">
+                                🔄 刷新
+                            </button>
+                        </div>
+                        <div class="output-layout">
+                            <div class="output-sidebar">
+                                <div class="file-tree-header">文件目录</div>
+                                <div id="output-file-tree" class="file-tree"></div>
+                            </div>
+                            <div class="output-preview">
+                                <div id="output-preview" class="preview-container">
+                                    <div class="preview-empty">选择文件查看预览</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

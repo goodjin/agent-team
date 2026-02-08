@@ -64,10 +64,10 @@ export class TaskOrchestrator {
     
     // 确保 roleAssignment 存在且有有效的 role
     if (!roleAssignment || !roleAssignment.role) {
-      console.warn('⚠️ 角色分配失败，使用默认 developer 角色');
+      console.warn('⚠️ 角色分配失败，使用默认 product-manager 角色');
       roleAssignment = {
-        role: 'developer',
-        needsProjectManager: false,
+        role: 'product-manager',
+        needsProjectManager: true,
         priority: 'medium' as const,
       };
     }
@@ -103,8 +103,8 @@ export class TaskOrchestrator {
       if (!roleConfig) {
         // 默认分配
         return {
-          role: 'developer',
-          needsProjectManager: false,
+          role: 'product-manager',
+          needsProjectManager: true,
           priority: 'medium',
         };
       }
@@ -166,8 +166,8 @@ export class TaskOrchestrator {
 
     // 默认分配
     return {
-      role: 'developer',
-      needsProjectManager: false,
+      role: 'product-manager',
+      needsProjectManager: true,
       priority: 'medium',
     };
   }
