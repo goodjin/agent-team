@@ -213,8 +213,8 @@ function parseRoleYaml(content: string, fileName: string): RoleDefinition | null
     constraints: [],
     tags: [],
     properties: {
-      canDelete: true,
-      canDisable: true,
+      canDelete: false,
+      canDisable: false,
       hidden: false,
     },
   };

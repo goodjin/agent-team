@@ -38,3 +38,20 @@ coverage/
 .cache/
 temp/
 tmp/
+
+# Runtime task data
+data/backups/
+data/tasks.json
+data/tasks.json.tmp
+
+# Agent workspaces (runtime-generated)
+*-workspace/
+workspace/
+my-custom-path/
+crm-server/
+
+# Agent state files
+**/.agent-state/
+
+# Claude Code memory (auto-generated, project-specific)
+.claude/memory/

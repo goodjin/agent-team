@@ -341,17 +341,35 @@ export class OpenAIService extends LLMService {
     const temperature = options?.temperature ?? this.config.temperature ?? 0.7;
     const maxTokens = options?.maxTokens ?? this.config.maxTokens ?? 4000;
 
-    const requestBody = {
-      model: this.config.model,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
-      temperature,
-      max_tokens: maxTokens,
+    const model = this.config.model;
+
+    const isGLMModel = model.startsWith('glm-');
+
+    const messagesFormatted = messages.map(m => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+    const requestBody: any = {
+      model,
+      messages: messagesFormatted,
+      temperature: temperature,
     };
 
+    if (isGLMModel) {
+      requestBody.max_new_tokens = maxTokens;
+      requestBody.extra_body = {
+        thinking: { type: "enabled" }
+      };
+    } else {
+      requestBody.max_tokens = maxTokens;
+    }
+
     const baseURL = this.config.baseURL || 'OpenAI';
+
+    console.log(`[LLM] 请求: ${baseURL}/chat/completions`);
+    console.log(`[LLM] model: ${model}`);
+    console.log(`[LLM] body:`, JSON.stringify(requestBody, null, 2));
 
     return wrapLLMCall(async () => {
       const response = await fetch(`${baseURL}/chat/completions`, {

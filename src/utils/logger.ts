@@ -120,13 +120,25 @@ export class Logger {
       }
 
       // 打开新的文件流（如果需要）
-      if (!this.logStream) {
+      if (!this.logStream || this.currentLogFile !== logFilePath) {
         this.currentLogFile = logFilePath;
-        this.logStream = await fs.open(logFilePath, 'a');
+        try {
+          if (this.logStream) {
+            await this.logStream.close().catch(() => {});
+          }
+          this.logStream = await fs.open(logFilePath, 'a');
+        } catch (error) {
+          if (this.config.logToConsole) {
+            console.error('打开日志文件失败:', error);
+          }
+          return;
+        }
       }
 
       // 写入日志（追加模式）
-      await this.logStream.write(message);
+      if (this.logStream) {
+        await this.logStream.write(message + '\n').catch(() => {});
+      }
 
       // 检查文件大小，如果超过限制则轮转
       const stats = await fs.stat(logFilePath);

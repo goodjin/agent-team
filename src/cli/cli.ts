@@ -126,7 +126,7 @@ async function startChat() {
       CLIUtils.warning('⚠️  LLM 配置未就绪');
       CLIUtils.blank();
       console.log('当前配置状态：');
-      console.log(`  • 已配置提供商: ${validation.summary.configuredProviders}`);
+      console.log(`  • 已配置提供商: ${validation.summary.totalProviders}`);
       console.log(`  • 已启用提供商: ${validation.summary.enabledProviders}`);
       console.log(`  • 可用提供商: ${validation.summary.readyToUse}`);
       CLIUtils.blank();

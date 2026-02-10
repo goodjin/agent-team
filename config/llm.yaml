@@ -1,0 +1,137 @@
+version: "5.0.0"
+
+# 默认服务商
+defaultProvider: "openai"
+
+# 服务商配置
+providers:
+  openai:
+    name: "OpenAI"
+    provider: "openai"
+    apiKey: "${OPENAI_API_KEY}"
+    baseURL: ""                        # 留空使用默认
+    weight: 10                         # 权重，0 表示不可用
+    enabled: true                      # 是否启用
+    timeout: 60000                     # 超时时间（毫秒）
+    maxRetries: 3                      # 最大重试次数
+    models:                            # 支持的模型
+      gpt-4-turbo:
+        model: "gpt-4-turbo-preview"
+        maxTokens: 128000
+        contextWindow: 128000
+      gpt-4o:
+        model: "gpt-4o"
+        maxTokens: 128000
+        contextWindow: 128000
+      gpt-4o-mini:
+        model: "gpt-4o-mini"
+        maxTokens: 128000
+        contextWindow: 128000
+
+  claude:
+    name: "Anthropic Claude"
+    provider: "anthropic"
+    apiKey: "${ANTHROPIC_API_KEY}"
+    weight: 8
+    enabled: true
+    timeout: 60000
+    maxRetries: 3
+    models:
+      claude-3-5-sonnet:
+        model: "claude-3-5-sonnet-20241022"
+        maxTokens: 200000
+        contextWindow: 200000
+      claude-3-5-haiku:
+        model: "claude-3-5-haiku-20241022"
+        maxTokens: 200000
+        contextWindow: 200000
+
+  deepseek:
+    name: "DeepSeek"
+    provider: "openai"                 # 兼容 OpenAI SDK
+    apiKey: "${DEEPSEEK_API_KEY}"
+    baseURL: "https://api.deepseek.com/v1"
+    weight: 7
+    enabled: true
+    timeout: 60000
+    maxRetries: 3
+    models:
+      deepseek-chat:
+        model: "deepseek-chat"
+        maxTokens: 64000
+        contextWindow: 64000
+
+  qwen:
+    name: "Qwen (通义千问)"
+    provider: "openai"                 # 兼容 OpenAI SDK
+    apiKey: "${QWEN_API_KEY}"
+    baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    weight: 6
+    enabled: false                     # 默认禁用
+    timeout: 60000
+    maxRetries: 3
+    models:
+      qwen-max:
+        model: "qwen-max"
+        maxTokens: 8000
+        contextWindow: 30000
+      qwen-turbo:
+        model: "qwen-turbo"
+        maxTokens: 8000
+        contextWindow: 8000
+
+  minimax:
+    name: "MiniMax"
+    provider: "openai"                 # 兼容 OpenAI/Anthropic SDK
+    apiKey: "${MINIMAX_API_KEY}"
+    baseURL: ""                        # 需要填写实际的 endpoint
+    weight: 5
+    enabled: false                     # 默认禁用
+    timeout: 60000
+    maxRetries: 3
+    models:
+      minimax-m2-1:
+        model: "MiniMax-M2.1"
+        maxTokens: 204800
+        contextWindow: 204800
+      minimax-m2-1-lightning:
+        model: "MiniMax-M2.1-lightning"
+        maxTokens: 204800
+        contextWindow: 204800
+
+  bigmodel:
+    name: "BigModel (智谱 GLM)"
+    provider: "bigmodel"               # 自定义适配器
+    apiKey: "${BIGMODEL_API_KEY}"
+    baseURL: "https://open.bigmodel.cn/api/paas/v4"
+    weight: 5
+    enabled: false                     # 默认禁用
+    timeout: 60000
+    maxRetries: 3
+    models:
+      glm-4:
+        model: "glm-4"
+        maxTokens: 128000
+        contextWindow: 128000
+      glm-4-flash:
+        model: "glm-4-flash"
+        maxTokens: 128000
+        contextWindow: 128000
+
+# 角色专属服务商配置
+roleMapping:
+  master-agent:
+    provider: "claude"
+    model: "claude-3-5-sonnet-20241022"
+
+  developer:
+    provider: "openai"
+    model: "gpt-4-turbo-preview"
+
+  tester:
+    provider: "deepseek"
+    model: "deepseek-chat"
+
+  architect:
+    provider: "claude"
+    model: "claude-3-5-sonnet-20241022"

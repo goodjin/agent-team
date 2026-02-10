@@ -5,6 +5,9 @@ import { createAgentRouter } from './routes/agents.js';
 import { createWorkflowRouter } from './routes/workflows.js';
 import { createProjectRouter } from './routes/projects.js';
 import { createWorkDirRouter } from './routes/work-dir.js';
+import { createTasksV4Router } from './routes/tasks-v4.js';
+import { broadcastTaskEvent, broadcastAgentEvent } from './routes/tasks.js';
+import { ResultsUI } from '../ui/results-ui.js';
 import type {
   Task,
   TaskType,
@@ -13,6 +16,17 @@ import type {
   TaskStatus,
   TaskMessage,
 } from '../types/index.js';
+
+function log(...args: any[]) {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  const timestamp = new Date().toISOString().split('T')[1].split('.')[0];
+  console.log(`[${timestamp}] ${msg}`);
+}
+
+function errorLog(...args: any[]) {
+  const msg = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+  console.error(`[ERROR] ${msg}`);
+}
 
 export function createApiRoutes(agent: ProjectAgent): Router {
   const router = Router();
@@ -36,42 +50,55 @@ export function createApiRoutes(agent: ProjectAgent): Router {
    * 处理用户输入（智能判断是否属于已有任务或创建新任务）
    */
   router.post('/tasks/chat', async (req: Request, res: Response) => {
-    console.log('[API] 收到 /tasks/chat 请求');
-    console.log('[API] 请求体:', req.body);
+    log('[API] 收到 /tasks/chat 请求');
+    log('[API] 请求体:', req.body);
     
     try {
-      const { message } = req.body;
-      console.log('[API] 用户消息:', message?.substring(0, 50));
+      const { message } = req.body as { message?: string };
       
-      if (!message || typeof message !== 'string') {
-        console.log('[API] 消息无效');
-        return res.status(400).json({
-          success: false,
-          error: '缺少message字段',
+      if (!message?.trim()) {
+        log('[API] 消息无效');
+        return res.status(400).json({ success: false, error: '消息不能为空' });
+      }
+      
+      log('[API] 用户消息:', message?.substring(0, 50));
+      
+      log('[API] 调用 orchestrator.processUserInput...');
+      const result = await orchestrator.processUserInput(message);
+      
+      if (result?.task) {
+        log('[API] processUserInput 返回:', result?.task?.id);
+        log('[API] 任务已创建, role:', result.task.assignedRole);
+        
+        // 异步执行新任务
+        if (result.isNew && result.task) {
+          const taskManager = agent.getTaskManager();
+          log('[API] 自动执行新任务:', result.task.id);
+          taskManager.executeTask(result.task.id).catch((error: Error) => {
+            errorLog('[API] 任务执行失败:', result.task.id, error.message);
+          });
+        }
+        
+        return res.json({
+          success: true,
+          data: {
+            taskId: result.task.id,
+            role: result.task.assignedRole,
+            isNew: result.isNew,
+            matchResult: result.matchResult,
+          },
         });
       }
-
-      console.log('[API] 调用 orchestrator.processUserInput...');
-      const result = await orchestrator.processUserInput(message);
-      console.log('[API] processUserInput 返回:', result?.task?.id);
       
-      const taskManager = agent.getTaskManager();
-      const task = taskManager.getTask(result.task.id);
-      console.log('[API] 任务已创建, role:', task?.assignedRole);
-
-      // 序列化任务
-      const serializedTask = serializeTask(task!);
-
-      res.json({
+      return res.json({
         success: true,
         data: {
-          task: serializedTask,
-          isNew: result.isNew,
-          matchResult: result.matchResult,
+          taskId: result?.task?.id,
+          isNew: result?.isNew,
         },
       });
     } catch (error: any) {
-      console.error('[API] 处理失败:', error.message);
+      errorLog('[API] 处理失败:', error.message);
       res.status(500).json({
         success: false,
         error: error.message || '处理用户输入失败',
@@ -355,16 +382,16 @@ export function createApiRoutes(agent: ProjectAgent): Router {
    * 执行任务
    */
   router.post('/tasks/:id/execute', async (req: Request, res: Response) => {
-    console.log('[EXECUTE] 收到执行任务请求, taskId:', req.params.id);
+    log('[EXECUTE] 收到执行任务请求, taskId:', req.params.id);
     
     try {
       const taskManager = agent.getTaskManager();
       const taskId = req.params.id;
-      console.log('[EXECUTE] 获取 TaskManager, taskId:', taskId);
+      log('[EXECUTE] 获取 TaskManager, taskId:', taskId);
 
       // 获取任务详情
       const taskBefore = taskManager.getTask(taskId);
-      console.log('[EXECUTE] 任务执行前:', {
+      log('[EXECUTE] 任务执行前:', {
         id: taskBefore?.id,
         title: taskBefore?.title,
         assignedRole: taskBefore?.assignedRole,
@@ -372,27 +399,27 @@ export function createApiRoutes(agent: ProjectAgent): Router {
       });
 
       // 异步执行任务
-      console.log('[EXECUTE] 开始异步执行任务...');
+      log('[EXECUTE] 开始异步执行任务...');
       taskManager.executeTask(taskId).then((result) => {
         // 只在有错误时打印 error
         if (result.error) {
-          console.log('[EXECUTE] 任务执行完成, result:', {
+          log('[EXECUTE] 任务执行完成, result:', {
             success: result.success,
             error: result.error
           });
         } else {
-          console.log('[EXECUTE] 任务执行完成, result:', {
+          log('[EXECUTE] 任务执行完成, result:', {
             success: result.success
           });
         }
       }).catch((error: Error) => {
-        console.error(`[EXECUTE] 任务执行失败 ${taskId}:`, error.message);
-        console.error(`[EXECUTE] 错误堆栈:`, error.stack);
+        errorLog(`[EXECUTE] 任务执行失败 ${taskId}:`, error.message);
+        errorLog(`[EXECUTE] 错误堆栈:`, error.stack);
       });
 
       // 立即返回任务信息
       const task = taskManager.getTask(taskId);
-      console.log('[EXECUTE] 返回任务信息, role:', task?.assignedRole);
+      log('[EXECUTE] 返回任务信息, role:', task?.assignedRole);
       
       if (!task) {
         return res.status(404).json({
@@ -407,7 +434,7 @@ export function createApiRoutes(agent: ProjectAgent): Router {
         message: '任务已开始执行',
       });
     } catch (error: any) {
-      console.error('[EXECUTE] 执行异常:', error.message);
+      errorLog('[EXECUTE] 执行异常:', error.message);
       res.status(500).json({
         success: false,
         error: error.message || '执行任务失败',
@@ -434,6 +461,128 @@ export function createApiRoutes(agent: ProjectAgent): Router {
       });
     }
   });
+
+  // ==================== SSE 实时更新端点 ====================
+
+  /**
+   * GET /api/tasks/:id/events - 任务实时更新 SSE
+   */
+  router.get('/tasks/:id/events', (req: Request, res: Response) => {
+    const taskId = req.params.id;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    // 注册 SSE 客户端（使用从 routes/tasks.ts 导入的广播机制）
+    // 发送初始连接确认
+    res.write(`data: ${JSON.stringify({ type: 'connected', taskId })}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': heartbeat\n\n');
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 30000);
+
+    // 监听任务事件并转发
+    let closed = false;
+    const taskMgr = agent.getTaskManager();
+    const onTaskEvent = (event: any) => {
+      if (closed) return;
+      if (event.data?.task?.id === taskId || event.data?.taskId === taskId) {
+        try {
+          res.write(`data: ${JSON.stringify(event)}\n\n`);
+        } catch {
+          closed = true;
+        }
+      }
+    };
+
+    taskMgr.on('task:updated', onTaskEvent);
+    taskMgr.on('task:completed', onTaskEvent);
+    taskMgr.on('task:failed', onTaskEvent);
+    taskMgr.on('task:started', onTaskEvent);
+
+    req.on('close', () => {
+      closed = true;
+      clearInterval(heartbeat);
+    });
+  });
+
+  /**
+   * GET /api/tasks/:id/agents - 获取任务关联的 Agent 列表
+   */
+  router.get('/tasks/:id/agents', async (req: Request, res: Response) => {
+    try {
+      const agentMgr = agent.getAgentMgr();
+      const agents = await agentMgr.getAgents({});
+      const taskAgents = agents.filter((a: any) => a.currentTaskId === req.params.id);
+      res.json({
+        success: true,
+        data: taskAgents,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: error.message || '获取任务 Agent 列表失败',
+      });
+    }
+  });
+
+  /**
+   * GET /api/tasks/:id/agents/events - Agent 状态实时更新 SSE
+   */
+  router.get('/tasks/:id/agents/events', (req: Request, res: Response) => {
+    const taskId = req.params.id;
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    res.write(`data: ${JSON.stringify({ type: 'connected', taskId })}\n\n`);
+
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': heartbeat\n\n');
+      } catch {
+        clearInterval(heartbeat);
+      }
+    }, 30000);
+
+    let agentClosed = false;
+    const agentMgr = agent.getAgentMgr();
+    const onAgentEvent = (event: any) => {
+      if (agentClosed) return;
+      try {
+        res.write(`data: ${JSON.stringify(event)}\n\n`);
+      } catch {
+        agentClosed = true;
+      }
+    };
+
+    agentMgr.on('agent.status.changed', onAgentEvent);
+    agentMgr.on('agent.created', onAgentEvent);
+
+    req.on('close', () => {
+      agentClosed = true;
+      clearInterval(heartbeat);
+    });
+  });
+
+  // ==================== 任务成果路由 (v4) ====================
+  const taskManager = agent.getTaskManager();
+  router.use('/tasks', createTasksV4Router(
+    taskManager,
+    taskManager.getRetryManager(),
+    taskManager.getProgressTracker(),
+    new ResultsUI()
+  ));
 
   // ==================== 统计信息 ====================
   
@@ -509,7 +658,7 @@ export function createApiRoutes(agent: ProjectAgent): Router {
         data: roleDetails,
       });
     } catch (error: any) {
-      console.error('获取角色列表失败:', error);
+      errorLog('获取角色列表失败:', error);
       // 返回空列表而不是错误
       res.json({
         success: true,

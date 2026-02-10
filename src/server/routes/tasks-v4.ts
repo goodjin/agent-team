@@ -3,6 +3,7 @@ import { TaskManager } from '../../core/task-manager.js';
 import { RetryManager, type RetryInfo } from '../../core/retry-manager.js';
 import { ResultsUI } from '../../ui/results-ui.js';
 import { ProgressTracker } from '../../core/progress-tracker.js';
+import { SubTaskExecutor } from '../../core/subtask-executor.js';
 import type { OutputFile } from '../../types/output.js';
 
 export function createTasksV4Router(
@@ -248,6 +249,88 @@ export function createTasksV4Router(
       res.status(500).json({
         success: false,
         error: { code: 'GET_HISTORY_FAILED', message: error.message },
+      });
+    }
+  });
+
+  router.post('/:id/subtasks/:subtaskId/chat', async (req: Request, res: Response) => {
+    try {
+      const { message } = req.body;
+      if (!message) {
+        return res.status(400).json({
+          success: false,
+          error: { code: 'INVALID_REQUEST', message: 'Message is required' },
+        });
+      }
+
+      const task = taskManager.getTask(req.params.id);
+      if (!task) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'TASK_NOT_FOUND', message: 'Task not found' },
+        });
+      }
+
+      const subtaskExecutor = new SubTaskExecutor(
+        {
+          project: taskManager['projectConfig'],
+          currentTask: task,
+          history: [],
+          variables: new Map(),
+          tools: new Map(),
+        },
+        taskManager['toolRegistry']
+      );
+
+      const result = await subtaskExecutor.sendMessageToSubTask(
+        req.params.subtaskId,
+        message
+      );
+
+      res.json({ success: true, data: result });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'SEND_MESSAGE_FAILED', message: error.message },
+      });
+    }
+  });
+
+  router.get('/:id/subtasks', async (req: Request, res: Response) => {
+    try {
+      const task = taskManager.getTask(req.params.id);
+      if (!task) {
+        return res.status(404).json({
+          success: false,
+          error: { code: 'TASK_NOT_FOUND', message: 'Task not found' },
+        });
+      }
+
+      const subtaskExecutor = new SubTaskExecutor(
+        {
+          project: taskManager['projectConfig'],
+          currentTask: task,
+          history: [],
+          variables: new Map(),
+          tools: new Map(),
+        },
+        taskManager['toolRegistry']
+      );
+
+      const states = subtaskExecutor.getAgentStates();
+      const stats = subtaskExecutor.getStats();
+
+      res.json({
+        success: true,
+        data: {
+          states: Object.fromEntries(states),
+          stats,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: { code: 'GET_SUBTASKS_FAILED', message: error.message },
       });
     }
   });

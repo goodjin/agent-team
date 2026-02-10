@@ -33,6 +33,8 @@ import { WorkDirManager } from './work-dir-manager.js';
 import { TaskPersistence } from './task-persistence.js';
 import { ProgressTracker } from './progress-tracker.js';
 import { AutoScheduler } from './auto-scheduler.js';
+import { RetryManager } from './retry-manager.js';
+import { AgentExecutor } from './agent-executor.js';
 
 /**
  * 任务管理器
@@ -49,6 +51,7 @@ export class TaskManager extends EventEmitter {
   private persistence: TaskPersistence;
   private progressTracker: ProgressTracker;
   private autoScheduler: AutoScheduler;
+  private retryManager: RetryManager;
 
   constructor(projectConfig: ProjectConfig, toolRegistry: ToolRegistry) {
     super();
@@ -72,6 +75,16 @@ export class TaskManager extends EventEmitter {
       maxBackupCount: 5,
     });
     this.progressTracker = new ProgressTracker();
+    this.retryManager = new RetryManager(
+      {
+        maxAttempts: 3,
+        initialDelayMs: 5000,
+        maxDelayMs: 60000,
+        backoffMultiplier: 2,
+        retryableStatuses: ['failed'],
+      },
+      () => this.tasks
+    );
     this.autoScheduler = new AutoScheduler(
       {
         maxConcurrentTasks: 3,
@@ -147,6 +160,19 @@ export class TaskManager extends EventEmitter {
   }
 
   private fromPersistedTask(persisted: PersistedTask): Task {
+    const createdAt = persisted.metadata?.createdAt 
+      ? new Date(persisted.metadata.createdAt) 
+      : new Date();
+    const updatedAt = persisted.metadata?.updatedAt 
+      ? new Date(persisted.metadata.updatedAt) 
+      : new Date();
+    
+    const executionRecords: TaskExecutionRecord[] = (persisted.executionRecords || []).map((r: any) => ({
+      ...r,
+      startTime: new Date(r.startTime),
+      endTime: r.endTime ? new Date(r.endTime) : undefined,
+    }));
+    
     return {
       id: persisted.id,
       type: persisted.type as TaskType,
@@ -160,21 +186,29 @@ export class TaskManager extends EventEmitter {
       input: persisted.input || {},
       output: persisted.output,
       constraints: persisted.constraints,
-      metadata: persisted.metadata || {
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        restartCount: 0,
-        isRecovered: false,
+      metadata: {
+        createdAt,
+        updatedAt,
+        restartCount: (persisted.metadata?.restartCount as number) || 0,
+        isRecovered: (persisted.metadata?.isRecovered as boolean) || false,
+        lastExecutedAt: persisted.metadata?.lastExecutedAt 
+          ? new Date(persisted.metadata.lastExecutedAt) 
+          : undefined,
+        completedAt: persisted.metadata?.completedAt 
+          ? new Date(persisted.metadata.completedAt) 
+          : undefined,
+        recoveredFrom: persisted.metadata?.recoveredFrom,
       },
       progress: persisted.progress || {
         completedSteps: [],
         percentage: 0,
       },
-      executionRecords: (persisted.executionRecords || []) as TaskExecutionRecord[],
+      executionRecords,
       retryHistory: persisted.retryHistory || [],
       messages: [],
-      createdAt: persisted.metadata?.createdAt || new Date(),
-      updatedAt: persisted.metadata?.updatedAt || new Date(),
+      subtasks: [],
+      createdAt,
+      updatedAt,
     };
   }
 
@@ -502,7 +536,13 @@ export class TaskManager extends EventEmitter {
         provider: roleLLMConfig.provider,
       } : undefined;
 
-      const result = await role.execute(task, context);
+      const llmService = role.getLLMService();
+      const executor = new AgentExecutor(llmService, this.toolRegistry, {
+        maxIterations: 10,
+        maxToolCallsPerIteration: 5,
+      });
+
+      const result = await executor.execute(task, context);
 
       const executionEndTime = new Date();
       const duration = executionEndTime.getTime() - executionStartTime.getTime();
@@ -784,5 +824,13 @@ export class TaskManager extends EventEmitter {
         }
       }, 100);
     });
+  }
+
+  getRetryManager(): RetryManager {
+    return this.retryManager;
+  }
+
+  getProgressTracker(): ProgressTracker {
+    return this.progressTracker;
   }
 }

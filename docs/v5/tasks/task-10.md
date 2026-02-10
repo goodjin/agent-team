@@ -1,0 +1,670 @@
+# Task 10: 实现主 Agent
+
+**优先级**: P1
+**预计工时**: 10 小时
+**依赖**: 任务 9
+**状态**: 待执行
+
+---
+
+## 目标
+
+1. 实现 MasterAgent 类
+2. 实现任务分析和拆分
+3. 实现子 Agent 创建和管理
+4. 实现结果汇总
+5. 集成并发控制
+
+---
+
+## 输入
+
+- SubAgent: `src/ai/sub-agent.ts`
+- ConcurrencyController: `src/core/concurrency.ts`
+- 架构设计：`docs/v5/02-architecture.md`
+
+---
+
+## 输出
+
+- `src/ai/master-agent.ts`
+- 单元测试：`tests/ai/master-agent.test.ts`
+- 集成测试：`tests/integration/master-agent.test.ts`
+
+---
+
+## 实现步骤
+
+### 步骤 1: 实现 MasterAgent 类
+
+创建 `src/ai/master-agent.ts`：
+
+```typescript
+import { EventEmitter } from 'events';
+import EventEmitter3 from 'eventemitter3';
+import { SubAgent, SubAgentConfig, SubAgentProgress } from './sub-agent.js';
+import { AgentCommunicator } from './agent-communicator.js';
+import { ConcurrencyController } from '../core/concurrency.js';
+import { AgentLoop, Task, ExecutionContext, LoopResult } from './agent-loop.js';
+import type { LLMService } from '../services/llm/types.js';
+import { ToolExecutor } from '../tools/tool-executor.js';
+
+export interface SubTask {
+  id: string;
+  title: string;
+  description: string;
+  assignedTo?: string; // sub-agent ID
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  result?: LoopResult;
+}
+
+export interface MasterAgentConfig {
+  id: string;
+  llmService: LLMService;
+  toolExecutor: ToolExecutor;
+  maxConcurrentSubAgents?: number;
+  workspaceDir: string;
+}
+
+export class MasterAgent extends EventEmitter {
+  private id: string;
+  private llmService: LLMService;
+  private toolExecutor: ToolExecutor;
+  private agentLoop: AgentLoop;
+  private eventBus: EventEmitter3;
+  private communicator: AgentCommunicator;
+  private concurrencyController: ConcurrencyController;
+  private subAgents: Map<string, SubAgent> = new Map();
+  private subAgentCounter: number = 0;
+  private workspaceDir: string;
+
+  constructor(config: MasterAgentConfig) {
+    super();
+
+    this.id = config.id;
+    this.llmService = config.llmService;
+    this.toolExecutor = config.toolExecutor;
+    this.workspaceDir = config.workspaceDir;
+
+    // 创建事件总线
+    this.eventBus = new EventEmitter3();
+
+    // 创建通信器
+    this.communicator = new AgentCommunicator(this.id, this.eventBus);
+
+    // 创建并发控制器
+    this.concurrencyController = new ConcurrencyController(
+      config.maxConcurrentSubAgents || 3
+    );
+
+    // 创建 AgentLoop（用于任务分析）
+    this.agentLoop = new AgentLoop(
+      this.llmService,
+      this.toolExecutor,
+      {
+        systemPrompt: `You are a master agent responsible for analyzing and breaking down complex tasks into smaller subtasks.
+
+Your responsibilities:
+1. Analyze the task requirements
+2. Break down the task into smaller, manageable subtasks
+3. Determine dependencies between subtasks
+4. Assign subtasks to sub-agents
+
+Output format (JSON):
+{
+  "analysis": "Brief analysis of the task",
+  "subtasks": [
+    {
+      "id": "subtask-1",
+      "title": "Subtask title",
+      "description": "Detailed description",
+      "dependencies": []
+    }
+  ]
+}`,
+      }
+    );
+  }
+
+  /**
+   * 执行任务
+   */
+  async executeTask(task: Task): Promise<{
+    success: boolean;
+    subtasks: SubTask[];
+    results: LoopResult[];
+    error?: string;
+  }> {
+    this.emit('task:started', {
+      taskId: task.id,
+      title: task.title,
+    });
+
+    try {
+      // 1. 分析任务并拆分为子任务
+      this.emit('task:analyzing', { taskId: task.id });
+
+      const subtasks = await this.analyzeAndSplitTask(task);
+
+      this.emit('task:analyzed', {
+        taskId: task.id,
+        subtaskCount: subtasks.length,
+      });
+
+      // 2. 执行子任务
+      const results = await this.executeSubtasks(task, subtasks);
+
+      // 3. 汇总结果
+      const allSuccess = results.every((r) => r.success);
+
+      this.emit('task:completed', {
+        taskId: task.id,
+        success: allSuccess,
+        subtaskCount: subtasks.length,
+      });
+
+      return {
+        success: allSuccess,
+        subtasks,
+        results,
+      };
+    } catch (error: any) {
+      this.emit('task:error', {
+        taskId: task.id,
+        error: error.message,
+      });
+
+      return {
+        success: false,
+        subtasks: [],
+        results: [],
+        error: error.message,
+      };
+    }
+  }
+
+  /**
+   * 分析任务并拆分为子任务
+   */
+  private async analyzeAndSplitTask(task: Task): Promise<SubTask[]> {
+    const analysisTask: Task = {
+      id: `analysis-${task.id}`,
+      title: 'Analyze and split task',
+      description: `Analyze the following task and break it down into subtasks:\n\nTask: ${task.title}\n\nDescription: ${task.description}`,
+      context: task.context,
+    };
+
+    const result = await this.agentLoop.execute(analysisTask, {
+      workspaceDir: this.workspaceDir,
+      taskId: task.id,
+    });
+
+    if (!result.success) {
+      throw new Error(`Task analysis failed: ${result.error}`);
+    }
+
+    // 解析结果
+    try {
+      const analysis = JSON.parse(result.result || '{}');
+
+      const subtasks: SubTask[] = analysis.subtasks.map((st: any) => ({
+        id: st.id,
+        title: st.title,
+        description: st.description,
+        status: 'pending' as const,
+      }));
+
+      return subtasks;
+    } catch (error) {
+      // 如果解析失败，创建一个单一的子任务
+      return [
+        {
+          id: 'subtask-1',
+          title: task.title,
+          description: task.description,
+          status: 'pending' as const,
+        },
+      ];
+    }
+  }
+
+  /**
+   * 执行子任务
+   */
+  private async executeSubtasks(
+    parentTask: Task,
+    subtasks: SubTask[]
+  ): Promise<LoopResult[]> {
+    const results: LoopResult[] = [];
+
+    // 创建执行函数
+    const executeSubtask = async (subtask: SubTask): Promise<LoopResult> => {
+      // 创建子 Agent
+      const subAgent = this.createSubAgent();
+
+      this.emit('subtask:started', {
+        parentTaskId: parentTask.id,
+        subtaskId: subtask.id,
+        agentId: subAgent.getStatus().id,
+      });
+
+      // 监听进度
+      subAgent.on('progress', (progress: SubAgentProgress) => {
+        this.emit('subtask:progress', {
+          parentTaskId: parentTask.id,
+          subtaskId: subtask.id,
+          progress,
+        });
+      });
+
+      // 执行任务
+      const task: Task = {
+        id: subtask.id,
+        title: subtask.title,
+        description: subtask.description,
+      };
+
+      const context: ExecutionContext = {
+        workspaceDir: this.workspaceDir,
+        taskId: subtask.id,
+        parentTaskId: parentTask.id,
+      };
+
+      const result = await subAgent.executeTask(task, context);
+
+      subtask.status = result.success ? 'completed' : 'failed';
+      subtask.result = result;
+
+      this.emit('subtask:completed', {
+        parentTaskId: parentTask.id,
+        subtaskId: subtask.id,
+        success: result.success,
+      });
+
+      // 清理子 Agent
+      this.destroySubAgent(subAgent.getStatus().id);
+
+      return result;
+    };
+
+    // 使用并发控制器执行
+    const tasks = subtasks.map((subtask) => () => executeSubtask(subtask));
+
+    results.push(...(await this.concurrencyController.runAll(tasks)));
+
+    return results;
+  }
+
+  /**
+   * 创建子 Agent
+   */
+  private createSubAgent(): SubAgent {
+    const id = `${this.id}-sub-${++this.subAgentCounter}`;
+
+    const communicator = new AgentCommunicator(id, this.eventBus);
+
+    const subAgent = new SubAgent({
+      id,
+      role: 'worker',
+      llmService: this.llmService,
+      toolExecutor: this.toolExecutor,
+      communicator,
+    });
+
+    this.subAgents.set(id, subAgent);
+
+    this.emit('subagent:created', { id, count: this.subAgents.size });
+
+    return subAgent;
+  }
+
+  /**
+   * 销毁子 Agent
+   */
+  private destroySubAgent(id: string): void {
+    const subAgent = this.subAgents.get(id);
+
+    if (subAgent) {
+      subAgent.destroy();
+      this.subAgents.delete(id);
+
+      this.emit('subagent:destroyed', { id, count: this.subAgents.size });
+    }
+  }
+
+  /**
+   * 获取所有子 Agent 状态
+   */
+  getSubAgentsStatus(): Array<{
+    id: string;
+    role: string;
+    status: string;
+    currentTask: string | null;
+  }> {
+    return Array.from(this.subAgents.values()).map((agent) => agent.getStatus());
+  }
+
+  /**
+   * 获取并发状态
+   */
+  getConcurrencyStatus() {
+    return this.concurrencyController.getStatus();
+  }
+
+  /**
+   * 调整并发限制
+   */
+  setMaxConcurrent(max: number): void {
+    this.concurrencyController.setMaxConcurrent(max);
+  }
+
+  /**
+   * 清理所有子 Agent
+   */
+  cleanup(): void {
+    for (const [id] of this.subAgents) {
+      this.destroySubAgent(id);
+    }
+
+    this.communicator.destroy();
+  }
+}
+```
+
+### 步骤 2: 创建单元测试
+
+创建 `tests/ai/master-agent.test.ts`：
+
+```typescript
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { MasterAgent } from '../../src/ai/master-agent.js';
+import { ToolExecutor } from '../../src/tools/tool-executor.js';
+
+describe('MasterAgent', () => {
+  let mockLLM: any;
+  let toolExecutor: ToolExecutor;
+  let masterAgent: MasterAgent;
+
+  beforeEach(() => {
+    mockLLM = {
+      provider: 'test',
+      modelName: 'test-model',
+      chat: vi.fn(),
+    };
+
+    toolExecutor = new ToolExecutor({ confirmDangerous: false });
+
+    masterAgent = new MasterAgent({
+      id: 'master-1',
+      llmService: mockLLM,
+      toolExecutor,
+      maxConcurrentSubAgents: 2,
+      workspaceDir: '/tmp/test',
+    });
+  });
+
+  describe('executeTask', () => {
+    it('should analyze and execute task', async () => {
+      // Mock 任务分析响应
+      mockLLM.chat
+        .mockResolvedValueOnce({
+          id: '1',
+          model: 'test',
+          content: JSON.stringify({
+            analysis: 'Simple task',
+            subtasks: [
+              {
+                id: 'subtask-1',
+                title: 'Subtask 1',
+                description: 'First subtask',
+                dependencies: [],
+              },
+            ],
+          }),
+          stopReason: 'stop',
+          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        })
+        // Mock 子任务执行响应
+        .mockResolvedValueOnce({
+          id: '2',
+          model: 'test',
+          content: 'Subtask 1 completed',
+          stopReason: 'stop',
+          usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
+        });
+
+      const result = await masterAgent.executeTask({
+        id: 'task-1',
+        title: 'Test Task',
+        description: 'A test task to execute',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.subtasks.length).toBe(1);
+      expect(result.results.length).toBe(1);
+    });
+
+    it('should handle multiple subtasks', async () => {
+      // Mock 任务分析响应
+      mockLLM.chat
+        .mockResolvedValueOnce({
+          id: '1',
+          model: 'test',
+          content: JSON.stringify({
+            analysis: 'Complex task',
+            subtasks: [
+              {
+                id: 'subtask-1',
+                title: 'Subtask 1',
+                description: 'First',
+                dependencies: [],
+              },
+              {
+                id: 'subtask-2',
+                title: 'Subtask 2',
+                description: 'Second',
+                dependencies: [],
+              },
+            ],
+          }),
+          stopReason: 'stop',
+          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        })
+        // Mock 子任务执行响应
+        .mockResolvedValue({
+          id: '2',
+          model: 'test',
+          content: 'Completed',
+          stopReason: 'stop',
+          usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
+        });
+
+      const result = await masterAgent.executeTask({
+        id: 'task-1',
+        title: 'Complex Task',
+        description: 'A complex task with multiple subtasks',
+      });
+
+      expect(result.success).toBe(true);
+      expect(result.subtasks.length).toBe(2);
+      expect(result.results.length).toBe(2);
+    });
+
+    it('should respect concurrency limit', async () => {
+      let concurrent = 0;
+      let maxConcurrent = 0;
+
+      // Mock 任务分析
+      mockLLM.chat
+        .mockResolvedValueOnce({
+          id: '1',
+          model: 'test',
+          content: JSON.stringify({
+            analysis: 'Many subtasks',
+            subtasks: Array.from({ length: 5 }, (_, i) => ({
+              id: `subtask-${i + 1}`,
+              title: `Subtask ${i + 1}`,
+              description: `Subtask ${i + 1}`,
+              dependencies: [],
+            })),
+          }),
+          stopReason: 'stop',
+          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        })
+        // Mock 子任务执行
+        .mockImplementation(async () => {
+          concurrent++;
+          maxConcurrent = Math.max(maxConcurrent, concurrent);
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+
+          concurrent--;
+
+          return {
+            id: '2',
+            model: 'test',
+            content: 'Done',
+            stopReason: 'stop',
+            usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
+          };
+        });
+
+      await masterAgent.executeTask({
+        id: 'task-1',
+        title: 'Many Subtasks',
+        description: 'Task with many subtasks',
+      });
+
+      // 最大并发应该不超过 2
+      expect(maxConcurrent).toBeLessThanOrEqual(2);
+    });
+  });
+
+  describe('getSubAgentsStatus', () => {
+    it('should return empty array when no sub-agents', () => {
+      const status = masterAgent.getSubAgentsStatus();
+      expect(status).toEqual([]);
+    });
+  });
+
+  describe('cleanup', () => {
+    it('should cleanup all sub-agents', async () => {
+      mockLLM.chat
+        .mockResolvedValueOnce({
+          id: '1',
+          model: 'test',
+          content: JSON.stringify({
+            analysis: 'Test',
+            subtasks: [
+              { id: 'subtask-1', title: 'Test', description: 'Test', dependencies: [] },
+            ],
+          }),
+          stopReason: 'stop',
+          usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
+        })
+        .mockResolvedValue({
+          id: '2',
+          model: 'test',
+          content: 'Done',
+          stopReason: 'stop',
+          usage: { promptTokens: 50, completionTokens: 30, totalTokens: 80 },
+        });
+
+      await masterAgent.executeTask({
+        id: 'task-1',
+        title: 'Test',
+        description: 'Test',
+      });
+
+      masterAgent.cleanup();
+
+      const status = masterAgent.getSubAgentsStatus();
+      expect(status).toEqual([]);
+    });
+  });
+});
+```
+
+---
+
+## 验收标准
+
+- ✅ 任务分析正确
+- ✅ 任务拆分合理
+- ✅ 子 Agent 创建成功
+- ✅ 并发控制生效
+- ✅ 结果汇总正确
+- ✅ 单元测试覆盖率 > 80%
+- ✅ 集成测试通过
+
+---
+
+## 使用示例
+
+```typescript
+import { MasterAgent } from './ai/master-agent.js';
+import { ToolExecutor } from './tools/tool-executor.js';
+import { LLMServiceFactory } from './services/llm/factory.js';
+
+// 创建 LLM 服务
+const llmService = factory.create('claude', 'claude-3-5-sonnet-20241022');
+
+// 创建工具执行器
+const toolExecutor = new ToolExecutor();
+
+// 创建主 Agent
+const masterAgent = new MasterAgent({
+  id: 'master-1',
+  llmService,
+  toolExecutor,
+  maxConcurrentSubAgents: 3,
+  workspaceDir: '/path/to/workspace',
+});
+
+// 监听事件
+masterAgent.on('task:analyzing', (event) => {
+  console.log('Analyzing task:', event.taskId);
+});
+
+masterAgent.on('subtask:started', (event) => {
+  console.log(`Subtask ${event.subtaskId} started by ${event.agentId}`);
+});
+
+masterAgent.on('subtask:progress', (event) => {
+  console.log(`Progress: ${event.progress.message} (${event.progress.progress}%)`);
+});
+
+// 执行任务
+const result = await masterAgent.executeTask({
+  id: 'task-1',
+  title: 'Build a web application',
+  description: 'Create a full-stack web application with user authentication',
+});
+
+console.log('Success:', result.success);
+console.log('Subtasks:', result.subtasks.length);
+console.log('Results:', result.results);
+
+// 清理
+masterAgent.cleanup();
+```
+
+---
+
+## 相关文档
+
+- 任务 9: `docs/v5/tasks/task-09.md`
+- 任务 6: `docs/v5/tasks/task-06.md`
+- 架构设计：`docs/v5/02-architecture.md`
+
+---
+
+**任务完成标志**：
+
+- [ ] MasterAgent 类实现完成
+- [ ] 任务分析和拆分实现完成
+- [ ] 子 Agent 创建和管理实现完成
+- [ ] 并发控制集成完成
+- [ ] 结果汇总实现完成
+- [ ] 单元测试通过
+- [ ] 测试覆盖率 > 80%

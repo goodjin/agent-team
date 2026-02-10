@@ -131,7 +131,7 @@ export class ProjectAgent {
     console.log('='.repeat(50));
     console.log(`\n服务商总数: ${validation.summary.totalProviders}`);
     console.log(`已启用: ${validation.summary.enabledProviders}`);
-    console.log(`已配置: ${validation.summary.configuredProviders}`);
+    console.log(`已配置: ${validation.summary.totalProviders}`);
     console.log(`可用: ${validation.summary.readyToUse}`);
 
     if (validation.recommendations.length > 0) {
@@ -150,7 +150,7 @@ export class ProjectAgent {
         });
     }
 
-    if (!validation.isValid) {
+    if (!validation.valid) {
       console.log('\n提示: 请复制 .env.example 为 .env 并配置有效的 API Key');
     }
   }

@@ -34,10 +34,16 @@ export abstract class BaseRole {
     this.customSystemPrompt = customPrompt;
     this.workDirManager = workDirManager || new WorkDirManager();
 
-    // 如果提供了自定义提示词，更新定义
     if (customPrompt) {
       this.definition.systemPrompt = customPrompt;
     }
+  }
+
+  /**
+   * 获取 LLM 服务实例
+   */
+  getLLMService(): LLMService {
+    return this.llmService;
   }
 
   /**
