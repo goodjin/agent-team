@@ -16,6 +16,66 @@ import { BrowseTool, SearchTool, ClickTool, InputTool, SubmitTool, ScreenshotToo
 import { AnalyzeCodeTool, DetectCodeSmellsTool, DiffTool, GetImportsTool } from './code-analysis.js';
 import { BaseTool } from './base.js';
 
+// ============ v6 类型扩展 ============
+
+/**
+ * 工具权限级别
+ */
+export enum ToolPermission {
+  READ_ONLY = 'read_only',
+  WRITE = 'write',
+  NETWORK = 'network',
+  SHELL = 'shell',
+  CODE_EXEC = 'code_exec',
+  SYSTEM = 'system',
+}
+
+/**
+ * 工具类别
+ */
+export enum ToolCategory {
+  WEB = 'web',
+  SHELL = 'shell',
+  CODE = 'code',
+  FILE = 'file',
+  LLM = 'llm',
+  GIT = 'git',
+}
+
+/**
+ * 扩展工具定义（向后兼容 v5 ToolDefinition）
+ */
+export interface V6ToolDefinition extends ToolDefinition {
+  version?: string;
+  tags?: string[];
+  permissions?: ToolPermission[];
+  examples?: Array<{ description: string; params: unknown }>;
+  healthCheck?: () => Promise<boolean>;
+}
+
+/**
+ * 多维查询条件
+ */
+export interface ToolRegistryQuery {
+  keyword?: string;
+  category?: string;
+  tags?: string[];
+  permissions?: ToolPermission[];
+}
+
+/**
+ * 工具调用统计
+ */
+export interface ToolCallStats {
+  name: string;
+  totalCalls: number;
+  successCalls: number;
+  failedCalls: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
+  lastCalledAt?: Date;
+}
+
 /**
  * 工具注册表
  * 管理所有可用工具
@@ -24,6 +84,13 @@ export class ToolRegistry extends EventEmitter {
   private tools: Map<string, BaseTool> = new Map();
   private categories: Map<string, Set<string>> = new Map();
   private workDirManager: WorkDirManager;
+
+  // v6 新增：调用统计
+  private stats: Map<string, ToolCallStats> = new Map();
+
+  // v6 新增：健康检查
+  private healthCheckTimer: ReturnType<typeof setInterval> | null = null;
+  private toolHealthStatus: Map<string, boolean> = new Map();
 
   constructor(workDirManager: WorkDirManager) {
     super();
@@ -44,6 +111,18 @@ export class ToolRegistry extends EventEmitter {
       this.categories.set(category, new Set());
     }
     this.categories.get(category)!.add(name);
+
+    // v6：初始化统计条目
+    if (!this.stats.has(name)) {
+      this.stats.set(name, {
+        name,
+        totalCalls: 0,
+        successCalls: 0,
+        failedCalls: 0,
+        totalDurationMs: 0,
+        avgDurationMs: 0,
+      });
+    }
 
     this.emit('tool:registered', {
       event: 'tool:registered',
@@ -88,8 +167,11 @@ export class ToolRegistry extends EventEmitter {
 
   /**
    * 执行工具
+   * @param name 工具名称
+   * @param params 执行参数
+   * @param agentPermissions Agent 拥有的权限列表（undefined 表示跳过权限检查，向后兼容）
    */
-  async execute(name: string, params: any): Promise<ToolResult> {
+  async execute(name: string, params: any, agentPermissions?: ToolPermission[]): Promise<ToolResult> {
     const tool = this.tools.get(name);
 
     if (!tool) {
@@ -99,13 +181,26 @@ export class ToolRegistry extends EventEmitter {
       };
     }
 
-    // 检查工具是否可用
-    const available = await tool.isAvailable();
+    // 检查工具是否可用（含健康状态）
+    const available = await this.isToolAvailable(name, tool);
     if (!available) {
       return {
         success: false,
         error: `Tool is not available: ${name}`,
       };
+    }
+
+    // v6：权限检查（仅在 agentPermissions 传入时执行）
+    if (agentPermissions !== undefined) {
+      const definition = tool.getDefinition() as V6ToolDefinition;
+      const requiredPermissions = definition.permissions ?? [];
+      const missing = requiredPermissions.filter(p => !agentPermissions.includes(p));
+      if (missing.length > 0) {
+        return {
+          success: false,
+          error: `Permission denied: ${name} requires [${missing.join(', ')}]`,
+        };
+      }
     }
 
     // 发出执行前事件
@@ -115,8 +210,14 @@ export class ToolRegistry extends EventEmitter {
       data: { name, params },
     } as AgentEventData);
 
+    const startTime = Date.now();
+
     try {
       const result = await tool.execute(params);
+      const duration = Date.now() - startTime;
+
+      // v6：更新统计
+      this.updateStats(name, result.success, duration);
 
       // 发出执行后事件
       this.emit('tool:after-execute', {
@@ -127,6 +228,9 @@ export class ToolRegistry extends EventEmitter {
 
       return result;
     } catch (error) {
+      const duration = Date.now() - startTime;
+      this.updateStats(name, false, duration);
+
       const errorResult: ToolResult = {
         success: false,
         error: error instanceof Error ? error.message : String(error),
@@ -140,6 +244,35 @@ export class ToolRegistry extends EventEmitter {
 
       return errorResult;
     }
+  }
+
+  /**
+   * v6：检查工具是否可用（含健康状态）
+   */
+  private async isToolAvailable(name: string, tool: BaseTool): Promise<boolean> {
+    // 如果有健康状态缓存，且状态为 false，则不可用
+    if (this.toolHealthStatus.has(name) && !this.toolHealthStatus.get(name)) {
+      return false;
+    }
+    return tool.isAvailable();
+  }
+
+  /**
+   * v6：更新调用统计
+   */
+  private updateStats(name: string, success: boolean, durationMs: number): void {
+    const stat = this.stats.get(name);
+    if (!stat) return;
+
+    stat.totalCalls += 1;
+    if (success) {
+      stat.successCalls += 1;
+    } else {
+      stat.failedCalls += 1;
+    }
+    stat.totalDurationMs += durationMs;
+    stat.avgDurationMs = stat.totalCalls > 0 ? stat.totalDurationMs / stat.totalCalls : 0;
+    stat.lastCalledAt = new Date();
   }
 
   /**
@@ -277,12 +410,115 @@ export class ToolRegistry extends EventEmitter {
     return sections.join('\n');
   }
 
+  // ============ v6 新增方法 ============
+
+  /**
+   * 多维查询工具
+   */
+  query(q: ToolRegistryQuery): BaseTool[] {
+    return Array.from(this.tools.values()).filter(tool => {
+      const def = tool.getDefinition() as V6ToolDefinition;
+
+      // keyword：不区分大小写，匹配名称、描述、标签
+      if (q.keyword) {
+        const kw = q.keyword.toLowerCase();
+        const inName = def.name.toLowerCase().includes(kw);
+        const inDescription = def.description.toLowerCase().includes(kw);
+        const inTags = (def.tags ?? []).some(t => t.toLowerCase().includes(kw));
+        if (!inName && !inDescription && !inTags) {
+          return false;
+        }
+      }
+
+      // category：精确匹配
+      if (q.category !== undefined && def.category !== q.category) {
+        return false;
+      }
+
+      // tags：工具标签需包含查询标签的所有项
+      if (q.tags && q.tags.length > 0) {
+        const toolTags = def.tags ?? [];
+        const hasAllTags = q.tags.every(t => toolTags.includes(t));
+        if (!hasAllTags) {
+          return false;
+        }
+      }
+
+      // permissions：只返回具有指定权限的工具
+      if (q.permissions && q.permissions.length > 0) {
+        const toolPerms = def.permissions ?? [];
+        const hasAnyPerm = q.permissions.some(p => toolPerms.includes(p));
+        if (!hasAnyPerm) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * 启动定时健康检查
+   */
+  startHealthChecks(intervalMs: number): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+    }
+
+    const runChecks = async () => {
+      for (const [name, tool] of this.tools) {
+        const def = tool.getDefinition() as V6ToolDefinition;
+        if (def.healthCheck) {
+          try {
+            const healthy = await def.healthCheck();
+            this.toolHealthStatus.set(name, healthy);
+          } catch {
+            this.toolHealthStatus.set(name, false);
+          }
+        }
+      }
+    };
+
+    // 立即执行一次
+    void runChecks();
+    this.healthCheckTimer = setInterval(() => void runChecks(), intervalMs);
+
+    // 进程退出时清理
+    process.once('exit', () => this.stopHealthChecks());
+  }
+
+  /**
+   * 停止健康检查
+   */
+  stopHealthChecks(): void {
+    if (this.healthCheckTimer) {
+      clearInterval(this.healthCheckTimer);
+      this.healthCheckTimer = null;
+    }
+  }
+
+  /**
+   * 获取工具调用统计
+   */
+  getToolStats(name: string): ToolCallStats | undefined {
+    return this.stats.get(name);
+  }
+
+  /**
+   * 获取所有工具调用统计
+   */
+  getAllToolStats(): ToolCallStats[] {
+    return Array.from(this.stats.values());
+  }
+
   /**
    * 清空所有工具
    */
   clear(): void {
     this.tools.clear();
     this.categories.clear();
+    this.stats.clear();
+    this.toolHealthStatus.clear();
   }
 
   /**

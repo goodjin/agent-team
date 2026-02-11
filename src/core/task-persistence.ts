@@ -119,7 +119,10 @@ export class TaskPersistence {
     const storageDir = path.dirname(this.config.storagePath);
     await fs.mkdir(storageDir, { recursive: true });
 
-    const tempPath = `${this.config.storagePath}.tmp`;
+    // Use a unique temp filename per call to avoid race conditions
+    // when multiple concurrent saves use the same .tmp path
+    const uniqueId = `${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
+    const tempPath = `${this.config.storagePath}.${uniqueId}.tmp`;
     const data = JSON.stringify({
       version: storage.version,
       lastSavedAt: storage.lastSavedAt.toISOString(),

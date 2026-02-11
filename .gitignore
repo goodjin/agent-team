@@ -43,6 +43,7 @@ tmp/
 data/backups/
 data/tasks.json
 data/tasks.json.tmp
+data/tasks.json.*.tmp
 
 # Agent workspaces (runtime-generated)
 *-workspace/

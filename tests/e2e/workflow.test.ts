@@ -474,28 +474,20 @@ describe('E2E: Error Recovery and Graceful Degradation', () => {
     expect(result.error).toBeDefined();
   });
 
-  it('E2E-008c: should handle task operations on non-existent task', () => {
+  it('E2E-008c: should handle task operations on non-existent task', async () => {
     const config = { projectName: 'Test', projectPath: tempDir };
     const taskManager = new TaskManager(config, toolRegistry);
 
     const task = taskManager.getTask('non-existent-id');
     expect(task).toBeUndefined();
 
-    expect(() => {
-      try {
-        taskManager.updateTaskStatus('non-existent-id', 'in-progress');
-      } catch (e) {
-        // Expected to throw for non-existent task
-      }
-    }).not.toThrow();
+    await expect(
+      taskManager.updateTaskStatus('non-existent-id', 'in-progress'),
+    ).rejects.toThrow('Task not found: non-existent-id');
 
-    expect(() => {
-      try {
-        taskManager.deleteTask('non-existent-id');
-      } catch (e) {
-        // Expected to throw for non-existent task
-      }
-    }).not.toThrow();
+    await expect(
+      taskManager.deleteTask('non-existent-id'),
+    ).rejects.toThrow('Task not found: non-existent-id');
   });
 });
 
