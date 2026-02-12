@@ -8,6 +8,7 @@ import { createWorkDirRouter } from './routes/work-dir.js';
 import { createTasksV4Router } from './routes/tasks-v4.js';
 import { broadcastTaskEvent, broadcastAgentEvent } from './routes/tasks.js';
 import { createObservabilityRouter } from './routes/observability.js';
+import { createKnowledgeRouter } from './routes/knowledge.js';
 import { ResultsUI } from '../ui/results-ui.js';
 import type {
   Task,
@@ -35,6 +36,9 @@ export function createApiRoutes(agent: ProjectAgent): Router {
 
   // 可观测性路由（指标、日志、健康检查）
   router.use('/', createObservabilityRouter());
+
+  // 知识库路由
+  router.use('/knowledge', createKnowledgeRouter());
 
   // 智能体管理路由
   router.use('/agents', createAgentRouter(agent.getAgentMgr()));
