@@ -1,0 +1,12 @@
+{
+  "name": "logger-hook",
+  "version": "1.0.0",
+  "type": "hook",
+  "description": "记录所有工具调用的 Hook 插件",
+  "entry": "index.js",
+  "permissions": [],
+  "hook": {
+    "events": ["tool:before", "tool:after"],
+    "priority": 5
+  }
+}

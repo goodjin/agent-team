@@ -1,0 +1,14 @@
+{
+  "name": "audit-logger",
+  "version": "1.0.0",
+  "type": "hook",
+  "description": "在每次工具调用前后记录审计日志，用于合规审查",
+  "entry": "index.js",
+  "permissions": [],
+  "hook": {
+    "events": ["tool:before", "tool:after"],
+    "priority": 10
+  },
+  "license": "MIT",
+  "keywords": ["audit", "logging", "compliance"]
+}

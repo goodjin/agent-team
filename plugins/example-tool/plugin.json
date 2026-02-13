@@ -1,0 +1,11 @@
+{
+  "name": "example-tool",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "Example tool plugin: converts text to uppercase",
+  "entry": "index.ts",
+  "permissions": [],
+  "tool": {
+    "toolName": "text_uppercase"
+  }
+}

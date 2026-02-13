@@ -1,0 +1,17 @@
+{
+  "name": "http-request",
+  "version": "1.2.0",
+  "type": "tool",
+  "description": "发送 HTTP 请求并返回响应结果，支持 GET/POST/PUT/DELETE",
+  "entry": "index.js",
+  "permissions": [],
+  "sandbox": {
+    "timeout": 10000
+  },
+  "tool": {
+    "toolName": "http-request",
+    "category": "network"
+  },
+  "license": "MIT",
+  "keywords": ["http", "network", "api"]
+}

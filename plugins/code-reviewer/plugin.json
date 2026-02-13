@@ -1,0 +1,15 @@
+{
+  "name": "code-reviewer",
+  "version": "1.0.0",
+  "type": "role",
+  "description": "专注于代码质量审查的 SubAgent 角色，覆盖安全、性能、可读性三个维度",
+  "entry": "index.js",
+  "permissions": [],
+  "role": {
+    "roleName": "CodeReviewer",
+    "agentTypes": ["sub"],
+    "promptFile": "prompts/code-reviewer.md"
+  },
+  "license": "MIT",
+  "keywords": ["code-review", "quality", "security"]
+}
