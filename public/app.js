@@ -1,2675 +1,1776 @@
-// Agent Team Web UI - Enhanced Application
+// Agent Team - 任务管理中心前端应用
 
-// API基础URL
-const API_BASE = '/api';
+const API_BASE = '';
 
 // 状态管理
-let state = {
-    currentPage: 'dashboard',
-    currentTaskId: null,
-    currentProjectId: null,
-    tasks: [],
-    roles: [],
-    workflows: [],
-    agents: [],
-    projects: [],
-    stats: {
-        total: 0,
-        inProgress: 0,
-        completed: 0,
-        failed: 0
-    },
-    theme: localStorage.getItem('theme') || 'light',
-    notifications: []
+const state = {
+  tasks: [],
+  currentTask: null,
+  currentTab: 'overview',
+  filter: 'all',
+  loading: false,
+  ws: null,
+  tabData: {
+    logs: [],
+    subtasks: [],
+    artifacts: []
+  }
 };
 
-// 初始化
-document.addEventListener('DOMContentLoaded', () => {
-    initTheme();
-    initNavigation();
-    initModals();
-    initChatInput();
-    initGlobalSearch();
-    initKeyboardShortcuts();
-    
-    // 先检查配置状态
-    checkConfigStatus().then(() => {
-        loadDashboard();
-        loadRoles();
-        loadWorkflows();
-        startAutoRefresh();
-        showToast('欢迎使用 Agent Team 智能体指挥中心', 'success');
-    });
-});
-
-// 检查配置状态
-async function checkConfigStatus() {
-    try {
-        const data = await apiCall('/config').catch(() => null);
-        if (data?.data?.llm?.providers) {
-            const providers = Object.values(data.data.llm.providers);
-            const enabledProviders = providers.filter(p => p.enabled);
-            
-            if (enabledProviders.length === 0) {
-                showToast('⚠️  未配置 LLM 提供商，请先配置 API Key', 'warning');
-                showConfigReminder();
-            }
-        }
-    } catch {
-        // 忽略错误
-    }
-}
-
-// 显示配置提醒
-function showConfigReminder() {
-    const reminder = document.createElement('div');
-    reminder.className = 'config-reminder';
-    reminder.innerHTML = `
-        <div class="reminder-content">
-            <span class="reminder-icon">⚠️</span>
-            <div class="reminder-text">
-                <strong>需要配置 LLM</strong>
-                <p>请设置环境变量或编辑配置文件</p>
-            </div>
-            <button class="reminder-close" onclick="this.parentElement.parentElement.remove()">×</button>
-        </div>
-        <div class="reminder-actions">
-            <button class="btn btn-primary btn-sm" onclick="window.openConfigGuide()">查看配置指南</button>
-        </div>
-    `;
-    
-    // 添加样式
-    if (!document.getElementById('reminder-styles')) {
-        const style = document.createElement('style');
-        style.id = 'reminder-styles';
-        style.textContent = `
-            .config-reminder {
-                position: fixed;
-                bottom: 20px;
-                left: 50%;
-                transform: translateX(-50%);
-                background: var(--warning-light);
-                border: 1px solid var(--warning-color);
-                border-radius: var(--radius-lg);
-                padding: 1rem 1.5rem;
-                z-index: 1000;
-                max-width: 400px;
-                box-shadow: var(--shadow-lg);
-            }
-            .reminder-content {
-                display: flex;
-                align-items: center;
-                gap: 0.75rem;
-            }
-            .reminder-icon {
-                font-size: 1.5rem;
-            }
-            .reminder-text strong {
-                display: block;
-                color: #92400e;
-            }
-            .reminder-text p {
-                font-size: 0.875rem;
-                color: #78350f;
-                margin: 0.25rem 0 0 0;
-            }
-            .reminder-close {
-                background: none;
-                border: none;
-                font-size: 1.25rem;
-                cursor: pointer;
-                color: #78350f;
-                padding: 0.25rem 0.5rem;
-            }
-            .reminder-actions {
-                margin-top: 0.75rem;
-                display: flex;
-                gap: 0.5rem;
-            }
-        `;
-        document.head.appendChild(style);
-    }
-    
-    document.body.appendChild(reminder);
-    
-    // 3分钟后自动移除
-    setTimeout(() => {
-        if (reminder.parentElement) {
-            reminder.remove();
-        }
-    }, 180000);
-}
-
-// 全局函数：打开配置指南
-window.openConfigGuide = function() {
-    window.open('https://github.com/agent-team/docs/blob/main/CONFIG_GUIDE.md', '_blank');
+// 日志类型图标映射
+const LOG_ICONS = {
+  thought: '💭',
+  action: '▶️',
+  tool_call: '🔧',
+  tool_result: '✓',
+  milestone: '🏁',
+  status_change: '📢',
+  error: '❌',
+  info: 'ℹ️',
+  warning: '⚠️'
 };
 
-// 主题初始化
-function initTheme() {
-    if (state.theme === 'dark') {
-        document.documentElement.setAttribute('data-theme', 'dark');
-        document.getElementById('theme-toggle').innerHTML = '<span class="theme-icon">☀️</span>';
-    }
-    
-    document.getElementById('theme-toggle').addEventListener('click', toggleTheme);
-}
-
-function toggleTheme() {
-    const html = document.documentElement;
-    if (state.theme === 'light') {
-        state.theme = 'dark';
-        html.setAttribute('data-theme', 'dark');
-        document.getElementById('theme-toggle').innerHTML = '<span class="theme-icon">☀️</span>';
-        localStorage.setItem('theme', 'dark');
-        showToast('已切换到深色模式', 'info');
-    } else {
-        state.theme = 'light';
-        html.removeAttribute('data-theme');
-        document.getElementById('theme-toggle').innerHTML = '<span class="theme-icon">🌙</span>';
-        localStorage.setItem('theme', 'light');
-        showToast('已切换到浅色模式', 'info');
-    }
-}
-
-// 导航初始化
-function initNavigation() {
-    const navItems = document.querySelectorAll('.nav-item');
-    navItems.forEach(item => {
-        item.addEventListener('click', (e) => {
-            e.preventDefault();
-            const page = item.dataset.page;
-            switchPage(page);
-        });
-    });
-    
-    // 刷新任务按钮
-    document.getElementById('btn-refresh-tasks')?.addEventListener('click', () => {
-        loadTasks();
-        showToast('已刷新任务列表', 'info');
-    });
-}
-
-// 页面切换
-function switchPage(page) {
-    // 更新导航状态
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    const navItem = document.querySelector(`[data-page="${page}"]`);
-    if (navItem) {
-        navItem.classList.add('active');
-    }
-    
-    // 更新页面显示
-    document.querySelectorAll('.page').forEach(p => {
-        p.classList.remove('active');
-    });
-    const pageEl = document.getElementById(`page-${page}`);
-    if (pageEl) {
-        pageEl.classList.add('active');
-    }
-    
-    // 更新面包屑
-    updateBreadcrumb(page);
-    
-    state.currentPage = page;
-    
-    // 加载对应页面数据
-    switch (page) {
-        case 'dashboard':
-            loadDashboard();
-            break;
-        case 'tasks':
-            loadTasks();
-            break;
-        case 'agents':
-            loadAgents();
-            break;
-        case 'projects':
-            loadProjects();
-            break;
-        case 'workflows':
-            loadWorkflows();
-            break;
-        case 'reports':
-            loadReports();
-            break;
-        case 'settings':
-            loadSettings();
-            break;
-    }
-}
-
-// 全局函数：切换页面
-window.switchToPage = function(page, filter) {
-    switchPage(page);
-    if (filter && document.getElementById('filter-status')) {
-        document.getElementById('filter-status').value = filter;
-        applyFilters();
-    }
+// 成品类型配置
+const ARTIFACT_TYPES = {
+  code: { icon: '📄', label: '代码文件' },
+  document: { icon: '📝', label: '文档' },
+  diagram: { icon: '📊', label: '图表' },
+  test: { icon: '🧪', label: '测试' },
+  config: { icon: '⚙️', label: '配置' },
+  data: { icon: '📦', label: '数据' },
+  other: { icon: '📎', label: '其他' }
 };
-
-// 更新面包屑
-function updateBreadcrumb(page) {
-    const breadcrumbMap = {
-        'dashboard': ['首页', '仪表板'],
-        'tasks': ['首页', '任务中心'],
-        'task-detail': ['首页', '任务中心', '任务详情'],
-        'agents': ['首页', '智能体管理'],
-        'agent-detail': ['首页', '智能体管理', '智能体详情'],
-        'projects': ['首页', '项目管理'],
-        'workflows': ['首页', '工作流'],
-        'reports': ['首页', '分析报告'],
-        'settings': ['首页', '系统设置']
-    };
-    
-    const items = breadcrumbMap[page] || ['首页', page];
-    const breadcrumbEl = document.getElementById('breadcrumb');
-    if (breadcrumbEl) {
-        breadcrumbEl.innerHTML = items.map((item, index) => {
-            if (index === items.length - 1) {
-                return `<span class="current">${item}</span>`;
-            }
-            return `<span>${item}</span><span class="separator">/</span>`;
-        }).join('');
-    }
-}
-
-// 模态框初始化
-function initModals() {
-    // 创建任务模态框
-    const createTaskModal = document.getElementById('modal-create-task');
-    const createTaskBtn = document.getElementById('btn-quick-task');
-    
-    if (createTaskBtn && createTaskModal) {
-        createTaskBtn.addEventListener('click', () => {
-            createTaskModal.classList.add('active');
-            loadRolesForSelect();
-        });
-    }
-    
-    // 所有模态框的关闭按钮和点击外部关闭
-    document.querySelectorAll('.modal-close').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            const modal = btn.closest('.modal');
-            if (modal) {
-                modal.classList.remove('active');
-            }
-        });
-    });
-    
-    // 点击模态框外部关闭
-    document.querySelectorAll('.modal').forEach(modal => {
-        modal.addEventListener('click', (e) => {
-            if (e.target === modal) {
-                modal.classList.remove('active');
-            }
-        });
-    });
-    
-    // 创建智能体模态框
-    const createAgentModal = document.getElementById('modal-create-agent');
-    if (createAgentModal) {
-        const form = document.getElementById('form-create-agent');
-        form?.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            await createAgent(form);
-        });
-    }
-
-    // 创建项目模态框
-    const createProjectForm = document.getElementById('form-create-project');
-    createProjectForm?.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        await createProject(createProjectForm);
-    });
-
-    // 返回按钮
-    const backBtn = document.getElementById('btn-back-to-tasks');
-    if (backBtn) {
-        backBtn.addEventListener('click', () => {
-            switchPage('tasks');
-        });
-    }
-}
-
-// 对话输入初始化
-function initChatInput() {
-    const chatInput = document.getElementById('chat-input');
-    const sendBtn = document.getElementById('btn-send-message');
-    
-    if (sendBtn) {
-        sendBtn.addEventListener('click', sendMessage);
-    }
-    
-    if (chatInput) {
-        chatInput.addEventListener('keydown', async (e) => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-                await sendMessage();
-            } else if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                await sendMessage();
-            }
-        });
-    }
-}
-
-// 全局搜索初始化
-function initGlobalSearch() {
-    const searchInput = document.getElementById('global-search');
-    if (searchInput) {
-        searchInput.addEventListener('keydown', async (e) => {
-            if (e.key === 'Enter') {
-                const query = searchInput.value.trim();
-                if (query) {
-                    switchPage('tasks');
-                    document.getElementById('filter-search').value = query;
-                    applyFilters();
-                    showToast(`搜索: ${query}`, 'info');
-                }
-            }
-        });
-    }
-}
-
-// 键盘快捷键
-function initKeyboardShortcuts() {
-    document.addEventListener('keydown', async (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
-            e.preventDefault();
-            showCreateTaskModal();
-        }
-        if ((e.ctrlKey || e.metaKey) && e.key === '/') {
-            e.preventDefault();
-            document.getElementById('keyboard-help').classList.add('active');
-        }
-        if (e.key === 'Escape') {
-            document.querySelectorAll('.modal').forEach(m => m.classList.remove('active'));
-        }
-    });
-}
-
-// API调用
-async function apiCall(endpoint, options = {}) {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30秒超时
-    
-    try {
-        if (options.showLoading !== false) {
-            showLoading(true);
-        }
-        
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers,
-            },
-            ...options,
-            signal: controller.signal,
-        });
-        
-        clearTimeout(timeoutId);
-        
-        const data = await response.json();
-        if (!response.ok) {
-            throw new Error(data.error || '请求失败');
-        }
-        return data;
-    } catch (error) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-            console.warn('API请求超时:', endpoint);
-        } else {
-            console.error('API调用失败:', error);
-        }
-        throw error;
-    } finally {
-        if (options.showLoading !== false) {
-            showLoading(false);
-        }
-    }
-}
-
-// 加载仪表板
-async function loadDashboard() {
-    try {
-        const [statsData, tasksData] = await Promise.all([
-            apiCall('/stats').catch(() => ({ data: { tasks: { total: 0, byStatus: {} } } })),
-            apiCall('/tasks').catch(() => ({ data: [] }))
-        ]);
-
-        const stats = statsData.data?.tasks || { total: 0, byStatus: {} };
-        const tasks = tasksData.data || [];
-        
-        state.stats = {
-            total: stats.total || 0,
-            inProgress: stats.byStatus['in-progress'] || 0,
-            completed: stats.byStatus['completed'] || 0,
-            failed: stats.byStatus['failed'] || 0
-        };
-        
-        // 更新统计卡片
-        document.getElementById('stat-total').textContent = state.stats.total;
-        document.getElementById('stat-in-progress').textContent = state.stats.inProgress;
-        document.getElementById('stat-completed').textContent = state.stats.completed;
-        document.getElementById('stat-failed').textContent = state.stats.failed;
-        
-        // 计算完成率
-        const completionRate = state.stats.total > 0 
-            ? Math.round((state.stats.completed / state.stats.total) * 100) 
-            : 0;
-        document.getElementById('stat-completed-rate').textContent = `完成率 ${completionRate}%`;
-        
-        // 更新进度圆环
-        updateProgressCircle(completionRate);
-        
-        // 更新进度详情
-        document.getElementById('prog-completed').textContent = state.stats.completed;
-        document.getElementById('prog-inprogress').textContent = state.stats.inProgress;
-        document.getElementById('prog-pending').textContent = (stats.byStatus['pending'] || 0) + (stats.byStatus['blocked'] || 0);
-        document.getElementById('prog-failed').textContent = state.stats.failed;
-        
-        // 更新快速统计
-        document.getElementById('qs-tasks').textContent = state.stats.total;
-        
-        // 显示最近任务
-        const recentTasks = tasks.slice(0, 5);
-        renderTasks(recentTasks, 'recent-tasks-list', true);
-        renderTasksSidebar(tasks);
-        
-        // 加载活动列表
-        renderActivityList(tasks);
-        
-        // 加载智能体概览
-        loadAgentsOverview();
-        
-    } catch (error) {
-        console.error('加载仪表板失败:', error);
-    }
-}
-
-// 更新进度圆环
-function updateProgressCircle(percentage) {
-    const progressFill = document.getElementById('progress-fill');
-    const progressValue = document.getElementById('progress-value');
-    
-    if (progressFill && progressValue) {
-        const offset = 283 - (283 * percentage / 100);
-        progressFill.style.strokeDashoffset = offset;
-        progressValue.textContent = `${percentage}%`;
-    }
-}
-
-// 渲染活动列表
-function renderActivityList(tasks) {
-    const container = document.getElementById('activity-list');
-    if (!container) return;
-    
-    const activities = tasks.slice(0, 5).map(task => {
-        const icons = {
-            'completed': '✅',
-            'in-progress': '⚡',
-            'failed': '❌',
-            'pending': '⏳',
-            'blocked': '🚫'
-        };
-        return {
-            icon: icons[task.status] || '📋',
-            title: task.title,
-            time: formatRelativeTime(task.updatedAt),
-            type: task.status
-        };
-    });
-    
-    if (activities.length === 0) {
-        container.innerHTML = '<div class="activity-empty">暂无活动记录</div>';
-        return;
-    }
-    
-    container.innerHTML = activities.map(activity => `
-        <div class="activity-item">
-            <div class="activity-icon ${activity.type}">${activity.icon}</div>
-            <div class="activity-content">
-                <div class="activity-title">${escapeHtml(activity.title)}</div>
-                <div class="activity-time">${activity.time}</div>
-            </div>
-        </div>
-    `).join('');
-}
-
-// 加载智能体概览
-async function loadAgentsOverview() {
-    try {
-        const data = await apiCall('/agents').catch(() => ({ data: [] }));
-        state.agents = data.data || [];
-        
-        // 更新智能体计数
-        const running = state.agents.filter(a => a.status === 'running').length;
-        const idle = state.agents.filter(a => a.status === 'idle').length;
-        const error = state.agents.filter(a => a.status === 'error').length;
-        
-        document.getElementById('qs-agents').textContent = state.agents.length;
-        document.getElementById('agent-running').textContent = running;
-        document.getElementById('agent-idle').textContent = idle;
-        document.getElementById('agent-error').textContent = error;
-        document.getElementById('stat-in-progress-agents').textContent = `${running} 智能体处理中`;
-        
-        // 渲染智能体卡片
-        renderAgentCards(state.agents.slice(0, 4));
-        
-    } catch (error) {
-        console.error('加载智能体失败:', error);
-    }
-}
-
-// 渲染智能体卡片
-function renderAgentCards(agents) {
-    const container = document.getElementById('agent-cards');
-    if (!container) return;
-    
-    if (agents.length === 0) {
-        container.innerHTML = '<div class="activity-empty">暂无运行中的智能体</div>';
-        return;
-    }
-    
-    container.innerHTML = agents.map(agent => `
-        <div class="agent-card">
-            <div class="agent-card-header">
-                <span class="agent-name">${escapeHtml(agent.name || '未命名')}</span>
-                <span class="agent-status ${agent.status}">
-                    <span class="agent-status-dot"></span>
-                    ${getStatusText(agent.status)}
-                </span>
-            </div>
-            <div class="agent-card-body">
-                <div class="agent-card-stat">
-                    <span class="value">${agent.completedTasks || 0}</span>
-                    <span>已完成</span>
-                </div>
-                <div class="agent-card-stat">
-                    <span class="value">${agent.currentTask || '-'}</span>
-                    <span>当前任务</span>
-                </div>
-                <div class="agent-card-stat">
-                    <span class="value">${agent.role || '-'}</span>
-                    <span>角色</span>
-                </div>
-            </div>
-        </div>
-    `).join('');
-}
-
-// 发送消息
-async function sendMessage() {
-    const chatInput = document.getElementById('chat-input');
-    const message = chatInput?.value.trim();
-    
-    if (!message) return;
-    
-    showLoading(true);
-    chatInput.value = '';
-    
-    try {
-        const result = await apiCall('/tasks/chat', {
-            method: 'POST',
-            body: JSON.stringify({ message }),
-        });
-        
-        if (result.data.isNew) {
-            await loadTasks();
-            showToast('新任务已创建', 'success');
-            if (result.data.task) {
-                showTaskDetail(result.data.task.id);
-            }
-        } else {
-            await loadTasks();
-            showToast('消息已添加到任务', 'info');
-            if (currentTaskId === result.data.task?.id) {
-                await loadTaskDetail(result.data.task.id);
-            }
-        }
-    } catch (error) {
-        console.error('发送消息失败:', error);
-    } finally {
-        showLoading(false);
-    }
-}
-
-// 显示创建任务模态框
-window.showCreateTaskModal = function() {
-    document.getElementById('modal-create-task').classList.add('active');
-    loadRolesForSelect();
-};
-
-// 创建任务
-async function createTask(form) {
-    try {
-        const formData = new FormData(form);
-        const data = {
-            type: formData.get('type'),
-            title: formData.get('title'),
-            description: formData.get('description'),
-            priority: formData.get('priority'),
-            assignedRole: formData.get('assignedRole') || undefined,
-        };
-
-        await apiCall('/tasks', {
-            method: 'POST',
-            body: JSON.stringify(data),
-        });
-
-        document.getElementById('modal-create-task').classList.remove('active');
-        form.reset();
-        
-        showToast('任务创建成功', 'success');
-        
-        if (state.currentPage === 'tasks') {
-            loadTasks();
-        } else {
-            loadDashboard();
-        }
-    } catch (error) {
-        console.error('创建任务失败:', error);
-    }
-}
-
-// 显示创建智能体模态框
-window.showCreateAgentModal = function() {
-    document.getElementById('modal-create-agent').classList.add('active');
-    loadRolesForAgentSelect();
-};
-
-// 创建智能体
-async function createAgent(form) {
-    try {
-        const formData = new FormData(form);
-        const data = {
-            roleId: formData.get('roleId'),
-            taskId: formData.get('taskId') || undefined,
-            notes: formData.get('notes') || undefined,
-        };
-
-        await apiCall('/agents', {
-            method: 'POST',
-            body: JSON.stringify(data),
-        });
-
-        document.getElementById('modal-create-agent').classList.remove('active');
-        form.reset();
-        
-        showToast('智能体创建成功', 'success');
-        loadAgents();
-    } catch (error) {
-        console.error('创建智能体失败:', error);
-    }
-}
-
-// 显示创建工作流模态框
-window.showCreateWorkflowModal = function() {
-    const modal = document.getElementById('modal-create-workflow');
-    if (modal) {
-        modal.classList.add('active');
-    } else {
-        showToast('工作流创建功能开发中', 'info');
-    }
-};
-
-// 创建自定义工作流
-window.createCustomWorkflow = function() {
-    showToast('工作流创建功能开发中', 'info');
-};
-
-// 加载任务
-async function loadTasks() {
-    try {
-        const data = await apiCall('/tasks');
-        state.tasks = data.data || [];
-        renderTasks(state.tasks, 'tasks-list');
-        renderTasksSidebar(state.tasks);
-        updateFilters();
-    } catch (error) {
-        console.error('加载任务失败:', error);
-    }
-}
-
-// 渲染任务侧边栏
-function renderTasksSidebar(taskList) {
-    const container = document.getElementById('tasks-sidebar-list');
-    if (!container) return;
-    
-    const recentTasks = taskList.slice(0, 10);
-    
-    if (recentTasks.length === 0) {
-        container.innerHTML = '<div class="task-empty">暂无任务</div>';
-        return;
-    }
-    
-    container.innerHTML = recentTasks.map(task => `
-        <div class="task-sidebar-item ${task.id === state.currentTaskId ? 'active' : ''}" 
-             data-task-id="${task.id}"
-             onclick="showTaskDetail('${task.id}')">
-            <div class="task-sidebar-title">${escapeHtml(task.title)}</div>
-            <div class="task-sidebar-meta">
-                <span class="status-badge status-${task.status}">${getStatusText(task.status)}</span>
-                <span class="task-sidebar-time">${formatRelativeTime(task.updatedAt)}</span>
-            </div>
-        </div>
-    `).join('');
-}
-
-// 渲染任务列表
-function renderTasks(taskList, containerId, isCompact = false) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-
-    if (taskList.length === 0) {
-        container.innerHTML = `<div class="empty-state"><span class="empty-icon">📋</span><p>暂无任务</p><button class="btn btn-primary" onclick="showCreateTaskModal()">创建第一个任务</button></div>`;
-        return;
-    }
-
-    container.innerHTML = taskList.map(task => {
-        if (isCompact) {
-            return `
-                <div class="task-item compact" onclick="showTaskDetail('${task.id}')" style="cursor: pointer; padding: 1rem;">
-                    <div class="task-title">${escapeHtml(task.title)}</div>
-                    <div class="task-meta">
-                        <span class="status-badge status-${task.status}">${getStatusText(task.status)}</span>
-                        <span>${formatRelativeTime(task.updatedAt)}</span>
-                    </div>
-                </div>
-            `;
-        }
-        return `
-            <div class="task-item" onclick="showTaskDetail('${task.id}')" style="cursor: pointer;">
-                <div class="task-header">
-                    <div>
-                        <div class="task-title">${escapeHtml(task.title)}</div>
-                        <div class="task-meta">
-                            <span class="status-badge status-${task.status}">${getStatusText(task.status)}</span>
-                            <span class="priority-badge priority-${task.priority}">${getPriorityText(task.priority)}</span>
-                            ${task.assignedRole ? `<span>👤 ${task.assignedRole}</span>` : ''}
-                            <span>📅 ${formatDate(task.updatedAt)}</span>
-                        </div>
-                    </div>
-                </div>
-                ${task.description ? `<div class="task-description">${escapeHtml(task.description.substring(0, 100))}${task.description.length > 100 ? '...' : ''}</div>` : ''}
-                <div class="task-actions" onclick="event.stopPropagation()">
-                    ${task.status === 'pending' || task.status === 'blocked' ? `
-                        <button class="btn btn-primary btn-sm" onclick="executeTask('${task.id}')">▶ 执行</button>
-                    ` : ''}
-                    ${task.status === 'in-progress' ? `
-                        <button class="btn btn-secondary btn-sm" onclick="refreshTask('${task.id}')">🔄 刷新</button>
-                    ` : ''}
-                    ${task.status === 'failed' ? `
-                        <button class="btn btn-primary btn-sm" onclick="retryTask('${task.id}')">🔁 重试</button>
-                    ` : ''}
-                    <button class="btn btn-danger btn-sm" onclick="deleteTask('${task.id}')">🗑️</button>
-                </div>
-            </div>
-        `;
-    }).join('');
-}
-
-// 更新过滤器
-function updateFilters() {
-    const roleFilter = document.getElementById('filter-role');
-    if (roleFilter) {
-        const currentValue = roleFilter.value;
-        const roles = [...new Set(state.tasks.map(t => t.assignedRole).filter(Boolean))];
-        roleFilter.innerHTML = '<option value="">所有角色</option>' +
-            roles.map(role => `<option value="${role}">${role}</option>`).join('');
-        roleFilter.value = currentValue;
-    }
-    
-    // 添加过滤器事件
-    ['filter-status', 'filter-role', 'filter-priority', 'filter-search'].forEach(id => {
-        const el = document.getElementById(id);
-        if (el) {
-            el.removeEventListener('change', applyFilters);
-            el.removeEventListener('input', applyFilters);
-            el.addEventListener('change', applyFilters);
-            el.addEventListener('input', applyFilters);
-        }
-    });
-}
-
-// 应用过滤器
-function applyFilters() {
-    const status = document.getElementById('filter-status')?.value || '';
-    const role = document.getElementById('filter-role')?.value || '';
-    const priority = document.getElementById('filter-priority')?.value || '';
-    const search = document.getElementById('filter-search')?.value.toLowerCase() || '';
-
-    let filtered = state.tasks;
-
-    if (status) filtered = filtered.filter(t => t.status === status);
-    if (role) filtered = filtered.filter(t => t.assignedRole === role);
-    if (priority) filtered = filtered.filter(t => t.priority === priority);
-    if (search) {
-        filtered = filtered.filter(t =>
-            t.title.toLowerCase().includes(search) ||
-            t.description?.toLowerCase().includes(search)
-        );
-    }
-
-    renderTasks(filtered, 'tasks-list');
-}
-
-// 显示任务详情
-window.showTaskDetail = function(taskId) {
-    state.currentTaskId = taskId;
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.getElementById('page-task-detail').classList.add('active');
-    updateBreadcrumb('task-detail');
-    loadTaskDetail(taskId);
-    // 订阅 SSE 实时更新
-    subscribeTaskEvents(taskId);
-    subscribeAgentEvents(taskId);
-};
-
-// 加载任务详情
-async function loadTaskDetail(taskId) {
-    try {
-        const data = await apiCall(`/tasks/${taskId}`);
-        const task = data.data;
-        
-        // 更新标题
-        const titleEl = document.getElementById('task-detail-title');
-        if (titleEl) {
-            titleEl.textContent = task.title;
-        }
-        document.getElementById('task-detail-id').textContent = `ID: ${task.id}`;
-        
-        // 更新执行按钮状态
-        const executeBtn = document.getElementById('btn-execute-task');
-        if (executeBtn) {
-            executeBtn.style.display = task.status === 'pending' || task.status === 'blocked' ? 'inline-flex' : 'none';
-        }
-        
-        // 显示任务信息
-        renderTaskInfo(task);
-        
-        // 显示进度
-        renderTaskProgress(task);
-        
-        // 显示对话历史
-        renderTaskMessages(task);
-        
-        // 显示执行记录
-        renderExecutionRecords(task);
-        
-        // 显示工具调用
-        renderTaskTools(task);
-        
-        // 显示任务成果
-        loadTaskOutput(taskId);
-        
-    } catch (error) {
-        console.error('加载任务详情失败:', error);
-    }
-}
-
-function renderTaskInfo(task) {
-    const container = document.getElementById('task-info');
-    if (!container) return;
-    
-    container.innerHTML = `
-        <div class="info-item">
-            <span class="info-label">描述:</span>
-            <span class="info-value">${escapeHtml(task.description || '无')}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">状态:</span>
-            <span class="info-value"><span class="status-badge status-${task.status}">${getStatusText(task.status)}</span></span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">优先级:</span>
-            <span class="info-value"><span class="priority-badge priority-${task.priority}">${getPriorityText(task.priority)}</span></span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">类型:</span>
-            <span class="info-value">${getTaskTypeText(task.type)}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">负责角色:</span>
-            <span class="info-value">${task.assignedRole || '🤖 自动分配'}</span>
-        </div>
-        ${task.ownerRole ? `
-        <div class="info-item">
-            <span class="info-label">项目经理:</span>
-            <span class="info-value">${task.ownerRole}</span>
-        </div>
-        ` : ''}
-        <div class="info-item">
-            <span class="info-label">创建时间:</span>
-            <span class="info-value">${formatDate(task.createdAt)}</span>
-        </div>
-        <div class="info-item">
-            <span class="info-label">最后更新:</span>
-            <span class="info-value">${formatDate(task.updatedAt)}</span>
-        </div>
-    `;
-}
-
-function renderTaskProgress(task) {
-    const progressFill = document.getElementById('task-progress-fill');
-    const progressText = document.getElementById('task-progress-text');
-    const subtasksList = document.getElementById('subtasks-list');
-    
-    if (progressFill && progressText) {
-        const progress = task.progress?.percentage || 0;
-        progressFill.style.width = `${progress}%`;
-        progressText.textContent = `${progress}%`;
-    }
-    
-    if (subtasksList && task.subtasks) {
-        subtasksList.innerHTML = task.subtasks.map(st => `
-            <div class="subtask-item">
-                <span class="status ${st.status}">${st.status === 'completed' ? '✓' : st.status === 'in-progress' ? '●' : '○'}</span>
-                <span>${escapeHtml(st.title)}</span>
-            </div>
-        `).join('');
-    }
-}
-
-function renderTaskMessages(task) {
-    const container = document.getElementById('task-messages');
-    if (!container) return;
-    
-    const messages = task.messages || [];
-    
-    if (messages.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">暂无对话</p>';
-        return;
-    }
-    
-    container.innerHTML = messages.map(msg => `
-        <div class="message-item message-${msg.role === 'user' ? 'user' : 'assistant'}">
-            <div class="message-role">${msg.role === 'user' ? '👤 用户' : '🤖 助手'}</div>
-            <div class="message-content">${escapeHtml(msg.content)}</div>
-            <div class="message-time">${formatDate(msg.timestamp)}</div>
-        </div>
-    `).join('');
-    
-    container.scrollTop = container.scrollHeight;
-}
-
-function expandAllMessages() {
-    const container = document.getElementById('task-messages');
-    if (!container) return;
-    
-    const messages = container.querySelectorAll('.message-content');
-    messages.forEach(msg => {
-        msg.style.whiteSpace = 'pre-wrap';
-    });
-    
-    showToast('已展开全部消息', 'info');
-}
-
-function sendTaskMessage() {
-    const input = document.getElementById('task-message-input');
-    const message = input?.value.trim();
-    
-    if (!message) {
-        showToast('请输入消息', 'warning');
-        return;
-    }
-    
-    if (!state.currentTaskId) {
-        showToast('请先选择一个任务', 'warning');
-        return;
-    }
-    
-    input.value = '';
-    
-    apiCall(`/tasks/${state.currentTaskId}/chat`, {
-        method: 'POST',
-        body: JSON.stringify({ message }),
-    }).then(() => {
-        showToast('消息已发送', 'success');
-        loadTaskDetail(state.currentTaskId);
-    }).catch(error => {
-        console.error('发送消息失败:', error);
-        showToast('发送失败: ' + (error.message || '未知错误'), 'error');
-    });
-}
-
-function renderExecutionRecords(task) {
-    const container = document.getElementById('task-execution-records');
-    if (!container) return;
-    
-    const records = task.executionRecords || [];
-    
-    if (records.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">暂无执行记录</p>';
-        return;
-    }
-    
-    container.innerHTML = records.map(record => `
-        <div class="execution-record-item">
-            <div class="record-header">
-                <span class="record-role">${record.role || '系统'}</span>
-                <span class="record-action">${escapeHtml(record.action || '执行任务')}</span>
-            </div>
-            <div class="record-details">
-                <div class="record-time">${formatDate(record.startTime)} - ${record.endTime ? formatDate(record.endTime) : '进行中'}</div>
-                ${record.duration ? `<div class="record-duration">耗时: ${(record.duration / 1000).toFixed(2)}秒</div>` : ''}
-                ${record.tokensUsed ? `
-                <div class="record-tokens">
-                    Tokens: ${record.tokensUsed.totalTokens || 0} 
-                    (输入: ${record.tokensUsed.promptTokens || 0}, 输出: ${record.tokensUsed.completionTokens || 0})
-                </div>
-                ` : ''}
-            </div>
-            ${record.error ? `<div class="record-error">错误: ${escapeHtml(record.error)}</div>` : ''}
-        </div>
-    `).join('');
-}
-
-function renderTaskTools(task) {
-    const container = document.getElementById('task-tools');
-    if (!container) return;
-    
-    const tools = task.toolCalls || [];
-    
-    if (tools.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">暂无工具调用</p>';
-        return;
-    }
-    
-    container.innerHTML = tools.map(call => `
-        <div class="tool-item">
-            <span class="tool-name">${escapeHtml(call.tool)}</span>
-            <span>${escapeHtml(call.input || '')}</span>
-        </div>
-    `).join('');
-}
-
-// 执行任务
-window.executeTask = async function(taskId) {
-    try {
-        showLoading(true);
-        await apiCall(`/tasks/${taskId}/execute`, { method: 'POST' });
-        showToast('任务已开始执行', 'success');
-        setTimeout(() => {
-            loadTaskDetail(taskId);
-            loadTasks();
-        }, 1000);
-    } catch (error) {
-        console.error('执行任务失败:', error);
-    } finally {
-        showLoading(false);
-    }
-};
-
-// 执行当前任务
-window.executeCurrentTask = async function() {
-    if (!state.currentTaskId) {
-        showToast('请先选择一个任务', 'warning');
-        return;
-    }
-    await window.executeTask(state.currentTaskId);
-};
-
-// 编辑当前任务
-window.editCurrentTask = function() {
-    if (!state.currentTaskId) {
-        showToast('请先选择一个任务', 'warning');
-        return;
-    }
-    // 编辑功能待实现
-    showToast('任务编辑功能待实现', 'info');
-};
-
-// 删除当前任务
-window.deleteCurrentTask = async function() {
-    if (!state.currentTaskId) {
-        showToast('请先选择一个任务', 'warning');
-        return;
-    }
-    if (!confirm('确定要删除这个任务吗？')) {
-        return;
-    }
-    try {
-        showLoading(true);
-        await apiCall(`/tasks/${state.currentTaskId}`, { method: 'DELETE' });
-        showToast('任务已删除', 'success');
-        switchToPage('tasks');
-        loadTasks();
-    } catch (error) {
-        console.error('删除任务失败:', error);
-    } finally {
-        showLoading(false);
-    }
-};
-
-// 重试任务
-window.retryTask = async function(taskId) {
-    try {
-        showLoading(true);
-        await apiCall(`/tasks/${taskId}/retry`, { method: 'POST' });
-        showToast('任务已重新开始', 'success');
-        setTimeout(() => {
-            loadTaskDetail(taskId);
-            loadTasks();
-        }, 1000);
-    } catch (error) {
-        console.error('重试任务失败:', error);
-    } finally {
-        showLoading(false);
-    }
-};
-
-// 刷新任务
-window.refreshTask = async function(taskId) {
-    try {
-        await apiCall(`/tasks/${taskId}`);
-        showToast('已刷新', 'info');
-        loadTaskDetail(taskId);
-    } catch (error) {
-        console.error('刷新任务失败:', error);
-    }
-};
-
-// 删除任务
-window.deleteTask = async function(taskId) {
-    if (!confirm('确定要删除这个任务吗？')) return;
-    
-    try {
-        await apiCall(`/tasks/${taskId}`, { method: 'DELETE' });
-        showToast('任务已删除', 'success');
-        switchPage('tasks');
-        loadTasks();
-    } catch (error) {
-        console.error('删除任务失败:', error);
-    }
-};
-
-// 加载角色
-async function loadRoles() {
-    try {
-        const data = await apiCall('/roles');
-        state.roles = data.data || [];
-        renderRoles(state.roles);
-    } catch (error) {
-        console.error('加载角色失败:', error);
-    }
-}
-
-function renderRoles(roleList) {
-    const container = document.getElementById('roles-grid');
-    if (!container) return;
-
-    container.innerHTML = roleList.map(role => `
-        <div class="role-card">
-            <h3>${escapeHtml(role.name)}</h3>
-            <div class="role-description">${escapeHtml(role.description || '暂无描述')}</div>
-            ${role.capabilities && role.capabilities.length > 0 ? `
-                <div class="role-capabilities">
-                    <h4>能力:</h4>
-                    <ul>
-                        ${role.capabilities.slice(0, 5).map(cap => `<li>${escapeHtml(cap)}</li>`).join('')}
-                    </ul>
-                </div>
-            ` : ''}
-        </div>
-    `).join('');
-}
-
-// 加载角色到选择框
-async function loadRolesForSelect() {
-    try {
-        const data = await apiCall('/roles');
-        const select = document.getElementById('select-role');
-        if (select) {
-            select.innerHTML = '<option value="">🤖 自动分配</option>' +
-                data.data.map(role => `<option value="${role.id}">${role.name}</option>`).join('');
-        }
-    } catch (error) {
-        console.error('加载角色失败:', error);
-    }
-}
-
-async function loadRolesForAgentSelect() {
-    try {
-        const data = await apiCall('/roles');
-        const select = document.getElementById('select-agent-role');
-        if (select) {
-            select.innerHTML = '<option value="">选择角色...</option>' +
-                data.data.map(role => `<option value="${role.id}">${role.name}</option>`).join('');
-        }
-    } catch (error) {
-        console.error('加载角色失败:', error);
-    }
-}
-
-// 加载智能体
-async function loadAgents() {
-    try {
-        const data = await apiCall('/agents');
-        state.agents = data.data || [];
-        renderAgentsGrid(state.agents);
-    } catch (error) {
-        console.error('加载智能体失败:', error);
-    }
-}
-
-function renderAgentsGrid(agents) {
-    const container = document.getElementById('agents-grid');
-    if (!container) return;
-    
-    if (agents.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <span class="empty-icon">🤖</span>
-                <p>暂无运行中的智能体</p>
-                <button class="btn btn-primary" onclick="showCreateAgentModal()">创建第一个智能体</button>
-            </div>
-        `;
-        return;
-    }
-    
-    // 更新统计
-    const running = agents.filter(a => a.status === 'running').length;
-    const idle = agents.filter(a => a.status === 'idle').length;
-    const error = agents.filter(a => a.status === 'error').length;
-    
-    document.getElementById('agent-total').textContent = agents.length;
-    document.getElementById('agent-running-count').textContent = running;
-    document.getElementById('agent-idle-count').textContent = idle;
-    document.getElementById('agent-error-count').textContent = error;
-    
-    container.innerHTML = agents.map(agent => `
-        <div class="agent-card">
-            <div class="agent-card-header">
-                <span class="agent-name">${escapeHtml(agent.name || '未命名')}</span>
-                <span class="agent-status ${agent.status}">
-                    <span class="agent-status-dot"></span>
-                    ${getStatusText(agent.status)}
-                </span>
-            </div>
-            <div class="agent-card-body">
-                <div class="agent-card-stat">
-                    <span class="value">${agent.completedTasks || 0}</span>
-                    <span>已完成</span>
-                </div>
-                <div class="agent-card-stat">
-                    <span class="value">${agent.currentTask || '-'}</span>
-                    <span>当前任务</span>
-                </div>
-                <div class="agent-card-stat">
-                    <span class="value">${agent.role || '-'}</span>
-                    <span>角色</span>
-                </div>
-            </div>
-            <div class="task-actions">
-                <button class="btn btn-sm btn-secondary" onclick="viewAgentDetail('${agent.id}')">📊 详情</button>
-                <button class="btn btn-sm btn-danger" onclick="stopAgent('${agent.id}')">⏹️ 停止</button>
-            </div>
-        </div>
-    `).join('');
-}
-
-window.refreshAgents = function() {
-    loadAgents();
-    showToast('已刷新智能体列表', 'info');
-};
-
-window.stopAgent = async function(agentId) {
-    if (!confirm('确定要停止这个智能体吗？')) return;
-
-    try {
-        await apiCall(`/agents/${agentId}/stop`, { method: 'POST' });
-        showToast('智能体已停止', 'success');
-        loadAgents();
-    } catch (error) {
-        console.error('停止智能体失败:', error);
-        showToast('停止失败: ' + (error.message || '未知错误'), 'error');
-    }
-};
-
-window.restartAgent = async function(agentId) {
-    try {
-        await apiCall(`/agents/${agentId}/restart`, { method: 'POST' });
-        showToast('智能体正在重启', 'success');
-        loadAgents();
-    } catch (error) {
-        console.error('重启智能体失败:', error);
-        showToast('重启失败: ' + (error.message || '未知错误'), 'error');
-    }
-};
-
-window.deleteAgent = async function(agentId) {
-    if (!confirm('确定要删除这个智能体吗？')) return;
-
-    try {
-        await apiCall(`/agents/${agentId}`, { method: 'DELETE' });
-        showToast('智能体已删除', 'success');
-        loadAgents();
-    } catch (error) {
-        console.error('删除智能体失败:', error);
-        showToast('删除失败: ' + (error.message || '未知错误'), 'error');
-    }
-};
-
-window.viewAgentDetail = async function(agentId) {
-    try {
-        const data = await apiCall(`/agents/${agentId}`);
-        const agent = data.data;
-
-        if (!agent) {
-            showToast('智能体不存在', 'error');
-            return;
-        }
-
-        document.getElementById('agent-detail-name').textContent = agent.name || '未命名';
-        document.getElementById('agent-detail-id').textContent = `ID: ${agent.id}`;
-        document.getElementById('agent-detail-role').textContent = agent.roleId || '-';
-        document.getElementById('agent-detail-status').innerHTML = `<span class="agent-status ${agent.status}">${getStatusText(agent.status)}</span>`;
-        document.getElementById('agent-detail-created').textContent = formatDate(agent.metadata?.createdAt);
-        document.getElementById('agent-detail-active').textContent = formatDate(agent.metadata?.lastActiveAt);
-        document.getElementById('agent-detail-restarts').textContent = agent.metadata?.restartCount || 0;
-
-        document.getElementById('page-agents').classList.remove('active');
-        document.getElementById('page-agent-detail').classList.add('active');
-        updateBreadcrumb('agent-detail');
-
-        state.currentAgentId = agentId;
-    } catch (error) {
-        console.error('加载智能体详情失败:', error);
-        showToast('加载失败: ' + (error.message || '未知错误'), 'error');
-    }
-};
-
-window.backToAgents = function() {
-    document.getElementById('page-agent-detail').classList.remove('active');
-    document.getElementById('page-agents').classList.add('active');
-    updateBreadcrumb('agents');
-    state.currentAgentId = null;
-};
-
-// 加载项目
-async function loadProjects() {
-    console.log('[loadProjects] 开始加载项目');
-    try {
-        showLoading(true);
-        console.log('[loadProjects] 显示加载状态');
-        
-        const data = await apiCall('/projects');
-        console.log('[loadProjects] API返回:', data);
-        
-        state.projects = data.data || [];
-        console.log('[loadProjects] 项目数量:', state.projects.length);
-
-        if (state.projects.length > 0) {
-            const current = state.projects[0];
-            document.getElementById('current-project-name').textContent = current.name;
-            document.getElementById('current-project-path').textContent = current.path || '-';
-            document.getElementById('current-tasks').textContent = current.taskCount || 0;
-            document.getElementById('current-agents').textContent = current.agentCount || 0;
-            document.getElementById('current-completion').textContent = current.completionRate || '0%';
-        }
-
-        renderProjectsGrid(state.projects);
-    } catch (error) {
-        console.error('[loadProjects] 加载项目失败:', error);
-        showToast('加载项目失败: ' + (error.message || '未知错误'), 'error');
-    } finally {
-        showLoading(false);
-        console.log('[loadProjects] 隐藏加载状态');
-    }
-}
-
-function renderProjectsGrid(projects) {
-    const container = document.getElementById('projects-grid');
-    if (!container) return;
-
-    if (projects.length === 0) {
-        container.innerHTML = `
-            <div class="empty-state">
-                <span class="empty-icon">📁</span>
-                <p>暂无项目</p>
-                <button class="btn btn-primary" onclick="showCreateProjectModal()">➕ 创建第一个项目</button>
-            </div>
-        `;
-        return;
-    }
-
-    container.innerHTML = projects.map(project => `
-        <div class="project-card" data-project-id="${project.id}">
-            <div class="project-header">
-                <div class="project-info">
-                    <div class="project-name">${escapeHtml(project.name)}</div>
-                    <span class="status-badge status-${project.status || 'active'}">${getStatusLabel(project.status)}</span>
-                </div>
-                <div class="project-actions">
-                    <button class="btn-icon" onclick="event.stopPropagation(); viewProjectDetail('${project.id}')" title="查看详情">👁️</button>
-                    <button class="btn-icon" onclick="event.stopPropagation(); editProject('${project.id}')" title="编辑">✏️</button>
-                    <button class="btn-icon" onclick="event.stopPropagation(); deleteProjectById('${project.id}')" title="删除">🗑️</button>
-                </div>
-            </div>
-            <div class="project-description">${escapeHtml(project.description || '暂无描述')}</div>
-            <div class="project-path">📍 ${escapeHtml(project.path)}</div>
-            <div class="project-footer">
-                <span class="project-date">更新于 ${formatDate(project.metadata?.updatedAt)}</span>
-            </div>
-        </div>
-    `).join('');
-}
-
-function getStatusLabel(status) {
-    const labels = {
-        'active': '活跃',
-        'archived': '已归档',
-        'draft': '草稿'
-    };
-    return labels[status] || status;
-}
-
-// 显示创建项目模态框
-window.showCreateProjectModal = function() {
-    const modal = document.getElementById('modal-create-project');
-    if (modal) {
-        modal.classList.add('active');
-        const form = document.getElementById('form-create-project');
-        form?.reset();
-    }
-};
-
-// 查看项目详情
-window.viewProjectDetail = async function(projectId) {
-    try {
-        const data = await apiCall(`/projects/${projectId}`);
-        if (data.success && data.data) {
-            const project = data.data;
-            const modal = document.getElementById('modal-project-detail');
-            const body = document.getElementById('project-detail-body');
-            const title = document.getElementById('project-detail-title');
-
-            if (modal && body && title) {
-                title.textContent = `📁 ${escapeHtml(project.name)}`;
-                body.innerHTML = `
-                    <div class="project-detail-content">
-                        <div class="detail-section">
-                            <h4>基本信息</h4>
-                            <div class="detail-row">
-                                <span class="detail-label">项目ID:</span>
-                                <span class="detail-value">${project.id}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span class="detail-label">项目路径:</span>
-                                <span class="detail-value">${escapeHtml(project.path)}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span class="detail-label">状态:</span>
-                                <span class="status-badge status-${project.status}">${getStatusLabel(project.status)}</span>
-                            </div>
-                            <div class="detail-row">
-                                <span class="detail-label">可见性:</span>
-                                <span class="detail-value">${project.visibility || '私有'}</span>
-                            </div>
-                        </div>
-                        <div class="detail-section">
-                            <h4>描述</h4>
-                            <p>${escapeHtml(project.description || '暂无描述')}</p>
-                        </div>
-                        <div class="detail-section">
-                            <h4>创建时间</h4>
-                            <p>${formatDate(project.metadata?.createdAt)}</p>
-                        </div>
-                        <div class="detail-section">
-                            <h4>更新时间</h4>
-                            <p>${formatDate(project.metadata?.updatedAt)}</p>
-                        </div>
-                    </div>
-                `;
-                modal.classList.add('active');
-            }
-        }
-    } catch (error) {
-        console.error('获取项目详情失败:', error);
-        showToast('获取项目详情失败', 'error');
-    }
-};
-
-// 编辑项目
-window.editProject = function(projectId) {
-    const project = state.projects.find(p => p.id === projectId);
-    if (!project) {
-        showToast('项目不存在', 'error');
-        return;
-    }
-
-    const modal = document.getElementById('modal-create-project');
-    if (modal) {
-        const form = document.getElementById('form-create-project');
-        form.name.value = project.name;
-        form.path.value = project.path;
-        form.description.value = project.description || '';
-        form.visibility.value = project.visibility || 'private';
-
-        const submitBtn = form.querySelector('button[type="submit"]');
-        submitBtn.textContent = '更新项目';
-        submitBtn.onclick = async (e) => {
-            e.preventDefault();
-            await updateProjectById(projectId, form);
-        };
-
-        modal.classList.add('active');
-    }
-};
-
-// 创建项目
-async function createProject(form) {
-    try {
-        showLoading(true);
-        const formData = new FormData(form);
-        const data = {
-            name: formData.get('name'),
-            path: formData.get('path'),
-            description: formData.get('description'),
-            visibility: formData.get('visibility')
-        };
-
-        const result = await apiCall('/projects', {
-            method: 'POST',
-            body: JSON.stringify(data)
-        });
-
-        if (result.success) {
-            showToast('项目创建成功', 'success');
-            document.getElementById('modal-create-project')?.classList.remove('active');
-            loadProjects();
-        } else {
-            showToast(result.error?.message || '创建项目失败', 'error');
-        }
-    } catch (error) {
-        console.error('创建项目失败:', error);
-        showToast('创建项目失败', 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-// 更新项目
-async function updateProjectById(projectId, form) {
-    try {
-        showLoading(true);
-        const formData = new FormData(form);
-        const data = {
-            name: formData.get('name'),
-            path: formData.get('path'),
-            description: formData.get('description'),
-            visibility: formData.get('visibility')
-        };
-
-        const result = await apiCall(`/projects/${projectId}`, {
-            method: 'PUT',
-            body: JSON.stringify(data)
-        });
-
-        if (result.success) {
-            showToast('项目更新成功', 'success');
-            document.getElementById('modal-create-project')?.classList.remove('active');
-            loadProjects();
-        } else {
-            showToast(result.error?.message || '更新项目失败', 'error');
-        }
-    } catch (error) {
-        console.error('更新项目失败:', error);
-        showToast('更新项目失败', 'error');
-    } finally {
-        showLoading(false);
-    }
-}
-
-// 删除项目
-window.deleteProjectById = async function(projectId) {
-    const project = state.projects.find(p => p.id === projectId);
-    if (!project) {
-        showToast('项目不存在', 'error');
-        return;
-    }
-
-    if (!confirm(`确定要删除项目 "${project.name}" 吗？此操作不可撤销。`)) {
-        return;
-    }
-
-    try {
-        showLoading(true);
-        const result = await apiCall(`/projects/${projectId}`, {
-            method: 'DELETE'
-        });
-
-        if (result.success) {
-            showToast('项目已删除', 'success');
-            loadProjects();
-        } else {
-            showToast(result.error?.message || '删除项目失败', 'error');
-        }
-    } catch (error) {
-        console.error('删除项目失败:', error);
-        showToast('删除项目失败', 'error');
-    } finally {
-        showLoading(false);
-    }
-};
-
-// 切换到项目
-window.switchToProject = function(projectId) {
-    state.currentProjectId = projectId;
-    const project = state.projects.find(p => p.id === projectId);
-    if (project) {
-        document.getElementById('current-project-name').textContent = project.name;
-        document.getElementById('current-project-path').textContent = project.path || '-';
-        showToast(`已切换到项目: ${project.name}`, 'info');
-    }
-};
-
-// 加载工作流
-async function loadWorkflows() {
-    try {
-        const data = await apiCall('/workflows');
-        state.workflows = data.data || [];
-        renderWorkflows(state.workflows);
-        loadWorkflowTemplates();
-    } catch (error) {
-        console.error('加载工作流失败:', error);
-    }
-}
-
-async function loadWorkflowTemplates() {
-    try {
-        const templatesData = await apiCall('/workflows/templates');
-        renderWorkflowTemplates(templatesData.data || []);
-    } catch (error) {
-        console.error('加载工作流模板失败:', error);
-    }
-}
-
-function renderWorkflowTemplates(templates) {
-    const container = document.getElementById('workflow-templates');
-    if (!container) return;
-
-    if (templates.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary);">暂无模板</p>';
-        return;
-    }
-
-    container.innerHTML = templates.map(template => `
-        <div class="template-card" onclick="createWorkflowFromTemplate('${template.id}')">
-            <span class="template-icon">${getTemplateIcon(template.category)}</span>
-            <span class="template-name">${escapeHtml(template.name)}</span>
-            <span class="template-desc">${escapeHtml(template.description)}</span>
-        </div>
-    `).join('');
-}
-
-function getTemplateIcon(category) {
-    const icons = {
-        'development': '🔨',
-        'maintenance': '🔧',
-        'documentation': '📖',
-        'testing': '🧪',
-        'default': '🔄'
-    };
-    return icons[category] || icons.default;
-}
-
-window.createWorkflowFromTemplate = async function(templateId) {
-    try {
-        const templatesData = await apiCall('/workflows/templates');
-        const templates = templatesData.data || [];
-        const template = templates.find(t => t.id === templateId);
-
-        if (!template) {
-            showToast('模板不存在', 'error');
-            return;
-        }
-
-        const workflowData = {
-            name: `${template.name} (副本)`,
-            description: template.description,
-            steps: template.workflow?.steps || [],
-            settings: template.workflow?.settings || {
-                continueOnFailure: false,
-                parallelByDefault: false
-            }
-        };
-
-        const result = await apiCall('/workflows', {
-            method: 'POST',
-            body: workflowData
-        });
-
-        showToast('工作流创建成功', 'success');
-        loadWorkflows();
-    } catch (error) {
-        console.error('从模板创建工作流失败:', error);
-        showToast('创建工作流失败', 'error');
-    }
-};
-
-window.showCreateWorkflowModal = function() {
-    const modal = document.getElementById('modal-create-workflow');
-    if (modal) {
-        modal.classList.add('active');
-    }
-};
-
-window.createCustomWorkflow = async function() {
-    const name = document.getElementById('workflow-name')?.value;
-    const description = document.getElementById('workflow-description')?.value;
-
-    if (!name) {
-        showToast('请输入工作流名称', 'error');
-        return;
-    }
-
-    try {
-        await apiCall('/workflows', {
-            method: 'POST',
-            body: {
-                name,
-                description,
-                steps: [],
-                settings: {
-                    continueOnFailure: false,
-                    parallelByDefault: false
-                }
-            }
-        });
-
-        showToast('工作流创建成功', 'success');
-        closeModal('modal-create-workflow');
-        loadWorkflows();
-    } catch (error) {
-        console.error('创建工作流失败:', error);
-        showToast('创建工作流失败', 'error');
-    }
-};
-
-function renderWorkflows(workflowList) {
-    const container = document.getElementById('workflows-list');
-    if (!container) return;
-
-    if (workflowList.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: var(--text-secondary); padding: 2rem;">暂无自定义工作流</p>';
-        return;
-    }
-
-    container.innerHTML = workflowList.map(workflow => `
-        <div class="workflow-item">
-            <div class="workflow-header">
-                <h3>${escapeHtml(workflow.name)}</h3>
-                <div class="workflow-actions">
-                    <button class="btn btn-sm btn-secondary" onclick="viewWorkflowDetail('${workflow.id}')">👁️ 查看</button>
-                    <button class="btn btn-sm btn-primary" onclick="executeWorkflow('${workflow.id}')">▶ 执行</button>
-                    <button class="btn btn-sm btn-danger" onclick="deleteWorkflow('${workflow.id}')">🗑️ 删除</button>
-                </div>
-            </div>
-            <div class="workflow-description">${escapeHtml(workflow.description || '暂无描述')}</div>
-            ${workflow.steps && workflow.steps.length > 0 ? `
-                <div class="workflow-steps">
-                    <div class="workflow-steps-header">步骤流程:</div>
-                    ${workflow.steps.map((step, index) => `
-                        <div class="workflow-step">
-                            <span class="step-number">${index + 1}</span>
-                            <span class="step-name">${escapeHtml(step.name)}</span>
-                            <span class="step-role">👤 ${step.role || '自动分配'}</span>
-                            ${step.dependencies && step.dependencies.length > 0 ? `
-                                <span class="step-deps">依赖: ${step.dependencies.join(', ')}</span>
-                            ` : ''}
-                        </div>
-                    `).join('')}
-                </div>
-            ` : '<p style="color: var(--text-secondary); font-size: 0.875rem;">暂无步骤</p>'}
-            <div class="workflow-meta">
-                <span>步骤数: ${workflow.steps?.length || 0}</span>
-                <span>版本: ${workflow.version || '1.0.0'}</span>
-            </div>
-        </div>
-    `).join('');
-}
-
-// 查看工作流详情
-window.viewWorkflowDetail = async function(workflowId) {
-    try {
-        const data = await apiCall(`/workflows/${workflowId}`);
-        const workflow = data.data;
-
-        if (!workflow) {
-            showToast('工作流不存在', 'error');
-            return;
-        }
-
-        const modal = document.getElementById('modal-workflow-detail');
-        if (!modal) {
-            createWorkflowDetailModal();
-        }
-
-        const detailModal = document.getElementById('modal-workflow-detail');
-        const detailBody = document.getElementById('workflow-detail-body');
-
-        detailBody.innerHTML = `
-            <div class="workflow-detail-content">
-                <div class="detail-section">
-                    <h4>基本信息</h4>
-                    <div class="detail-row">
-                        <span class="detail-label">ID:</span>
-                        <span class="detail-value">${workflow.id}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">名称:</span>
-                        <span class="detail-value">${escapeHtml(workflow.name)}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">描述:</span>
-                        <span class="detail-value">${escapeHtml(workflow.description || '暂无描述')}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">版本:</span>
-                        <span class="detail-value">${workflow.version || '1.0.0'}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">步骤数:</span>
-                        <span class="detail-value">${workflow.steps?.length || 0}</span>
-                    </div>
-                </div>
-                ${workflow.steps && workflow.steps.length > 0 ? `
-                    <div class="detail-section">
-                        <h4>步骤详情</h4>
-                        <div class="workflow-steps-detail">
-                            ${workflow.steps.map((step, index) => `
-                                <div class="step-detail-card">
-                                    <div class="step-detail-header">
-                                        <span class="step-number">${index + 1}</span>
-                                        <span class="step-name">${escapeHtml(step.name)}</span>
-                                    </div>
-                                    <div class="step-detail-body">
-                                        <div class="detail-row">
-                                            <span class="detail-label">角色:</span>
-                                            <span class="detail-value">${step.role || '自动分配'}</span>
-                                        </div>
-                                        <div class="detail-row">
-                                            <span class="detail-label">类型:</span>
-                                            <span class="detail-value">${step.type || 'task'}</span>
-                                        </div>
-                                        ${step.description ? `
-                                            <div class="detail-row">
-                                                <span class="detail-label">描述:</span>
-                                                <span class="detail-value">${escapeHtml(step.description)}</span>
-                                            </div>
-                                        ` : ''}
-                                        ${step.dependencies && step.dependencies.length > 0 ? `
-                                            <div class="detail-row">
-                                                <span class="detail-label">依赖:</span>
-                                                <span class="detail-value">${step.dependencies.join(', ')}</span>
-                                            </div>
-                                        ` : ''}
-                                        ${step.timeout ? `
-                                            <div class="detail-row">
-                                                <span class="detail-label">超时:</span>
-                                                <span class="detail-value">${step.timeout}ms</span>
-                                            </div>
-                                        ` : ''}
-                                    </div>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                ` : ''}
-                ${workflow.settings ? `
-                    <div class="detail-section">
-                        <h4>设置</h4>
-                        <div class="detail-row">
-                            <span class="detail-label">失败时继续:</span>
-                            <span class="detail-value">${workflow.settings.continueOnFailure ? '是' : '否'}</span>
-                        </div>
-                        <div class="detail-row">
-                            <span class="detail-label">默认并行:</span>
-                            <span class="detail-value">${workflow.settings.parallelByDefault ? '是' : '否'}</span>
-                        </div>
-                    </div>
-                ` : ''}
-            </div>
-        `;
-
-        detailModal.classList.add('active');
-    } catch (error) {
-        console.error('获取工作流详情失败:', error);
-        showToast('获取工作流详情失败', 'error');
-    }
-};
-
-// 创建工作流详情模态框
-function createWorkflowDetailModal() {
-    if (document.getElementById('modal-workflow-detail')) return;
-
-    const modalHtml = `
-        <div id="modal-workflow-detail" class="modal">
-            <div class="modal-content modal-lg">
-                <div class="modal-header">
-                    <h3 id="workflow-detail-title">📋 工作流详情</h3>
-                    <button class="modal-close">&times;</button>
-                </div>
-                <div class="modal-body" id="workflow-detail-body">
-                </div>
-            </div>
-        </div>
-    `;
-
-    document.body.insertAdjacentHTML('beforeend', modalHtml);
-
-    const modal = document.getElementById('modal-workflow-detail');
-    const closeBtn = modal.querySelector('.modal-close');
-    closeBtn.addEventListener('click', () => {
-        modal.classList.remove('active');
-    });
-
-    modal.addEventListener('click', (e) => {
-        if (e.target === modal) {
-            modal.classList.remove('active');
-        }
-    });
-}
-
-// 删除工作流
-window.deleteWorkflow = async function(workflowId) {
-    const workflow = state.workflows.find(w => w.id === workflowId);
-    if (!workflow) {
-        showToast('工作流不存在', 'error');
-        return;
-    }
-
-    if (!confirm(`确定要删除工作流 "${workflow.name}" 吗？此操作不可撤销。`)) {
-        return;
-    }
-
-    try {
-        const result = await apiCall(`/workflows/${workflowId}`, {
-            method: 'DELETE'
-        });
-
-        if (result.success) {
-            showToast('工作流已删除', 'success');
-            loadWorkflows();
-        } else {
-            showToast(result.error?.message || '删除工作流失败', 'error');
-        }
-    } catch (error) {
-        console.error('删除工作流失败:', error);
-        showToast('删除工作流失败', 'error');
-    }
-};
-
-// 执行工作流
-window.executeWorkflow = async function(workflowId) {
-    try {
-        await apiCall(`/workflows/${workflowId}/execute`, { method: 'POST' });
-        showToast('工作流已开始执行', 'success');
-        setTimeout(() => {
-            loadTasks();
-            loadDashboard();
-        }, 1000);
-    } catch (error) {
-        console.error('执行工作流失败:', error);
-    }
-};
-
-// 加载报告
-async function loadReports() {
-    try {
-        // Token统计数据
-        document.getElementById('token-total').textContent = '1,234,567';
-        document.getElementById('token-cost').textContent = '$12.35';
-        document.getElementById('token-daily').textContent = '45,678';
-        document.getElementById('token-per-task').textContent = '2,345';
-        
-        // 性能排名
-        const tbody = document.getElementById('performance-tbody');
-        if (tbody) {
-            tbody.innerHTML = `
-                <tr>
-                    <td>1</td>
-                    <td>🤖 DEV-Agent-001</td>
-                    <td>45</td>
-                    <td>2.8K</td>
-                    <td>95%</td>
-                    <td>5m 32s</td>
-                </tr>
-                <tr>
-                    <td>2</td>
-                    <td>🤖 PM-Agent-001</td>
-                    <td>32</td>
-                    <td>1.2K</td>
-                    <td>100%</td>
-                    <td>3m 15s</td>
-                </tr>
-                <tr>
-                    <td>3</td>
-                    <td>🤖 TST-Agent-001</td>
-                    <td>28</td>
-                    <td>3.5K</td>
-                    <td>89%</td>
-                    <td>8m 45s</td>
-                </tr>
-            `;
-        }
-    } catch (error) {
-        console.error('加载报告失败:', error);
-    }
-}
-
-// 导出报告
-window.exportReport = function() {
-    showToast('报告导出中...', 'info');
-    setTimeout(() => {
-        showToast('报告已导出', 'success');
-    }, 1500);
-};
-
-// 加载设置
-async function loadSettings() {
-    try {
-        const configData = await apiCall('/config');
-        renderLlmConfig(configData.data);
-        renderSettingsRoles();
-        renderSettingsRules();
-    } catch (error) {
-        console.error('加载设置失败:', error);
-    }
-}
-
-function renderLlmConfig(config) {
-    const container = document.getElementById('llm-config');
-    if (!container) return;
-    
-    const providers = config.llm?.providers || [];
-    container.innerHTML = providers.map(p => `
-        <div class="config-item">
-            <span class="config-label">${p.name}</span>
-            <span class="config-value">
-                <span class="status-badge ${p.enabled ? 'status-completed' : 'status-pending'}">
-                    ${p.enabled ? '✅ 已启用' : '❌ 已禁用'}
-                </span>
-            </span>
-        </div>
-    `).join('') || '<p style="color: var(--text-secondary);">暂无LLM配置</p>';
-}
-
-function renderSettingsRoles() {
-    const container = document.getElementById('settings-roles-list');
-    if (!container) return;
-    
-    container.innerHTML = state.roles.map(role => `
-        <div class="config-item">
-            <span class="config-label">${role.name}</span>
-            <span class="config-value">
-                <button class="btn btn-sm btn-secondary">编辑</button>
-            </span>
-        </div>
-    `).join('') || '<p style="color: var(--text-secondary);">暂无角色配置</p>';
-}
-
-function renderSettingsRules() {
-    const container = document.getElementById('settings-rules-list');
-    if (!container) return;
-    
-    container.innerHTML = '<p style="color: var(--text-secondary);">暂无规则配置</p>';
-}
-
-// 导出报告
-window.exportReport = function() {
-    showToast('报告导出功能开发中', 'info');
-};
-
-// 导出所有数据
-window.exportAllData = function() {
-    try {
-        const data = {
-            tasks: state.tasks,
-            agents: state.agents,
-            projects: state.projects,
-            exportedAt: new Date().toISOString(),
-        };
-        
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `agent-team-backup-${new Date().toISOString().split('T')[0]}.json`;
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        showToast('数据导出成功', 'success');
-    } catch (error) {
-        console.error('导出数据失败:', error);
-        showToast('导出失败: ' + (error.message || '未知错误'), 'error');
-    }
-};
-
-// 导入数据
-window.importData = function() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.json';
-    
-    input.onchange = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        
-        try {
-            const text = await file.text();
-            const data = JSON.parse(text);
-            
-            if (data.tasks && Array.isArray(data.tasks)) {
-                showToast(`导入了 ${data.tasks.length} 个任务`, 'success');
-            }
-            
-            loadDashboard();
-            showToast('数据导入成功', 'success');
-        } catch (error) {
-            console.error('导入数据失败:', error);
-            showToast('导入失败: ' + (error.message || '文件格式错误'), 'error');
-        }
-    };
-    
-    input.click();
-};
-
-// 清除所有数据
-window.clearAllData = function() {
-    if (!confirm('确定要清除所有数据吗？此操作不可恢复！')) {
-        return;
-    }
-    
-    try {
-        localStorage.clear();
-        showToast('本地数据已清除，页面将刷新...', 'success');
-        setTimeout(() => {
-            window.location.reload();
-        }, 1500);
-    } catch (error) {
-        console.error('清除数据失败:', error);
-        showToast('清除失败: ' + (error.message || '未知错误'), 'error');
-    }
-};
-
-// 自动刷新
-function startAutoRefresh() {
-    setInterval(() => {
-        switch (state.currentPage) {
-            case 'dashboard':
-                loadDashboard();
-                break;
-            case 'tasks':
-                loadTasks();
-                break;
-            case 'agents':
-                loadAgents();
-                break;
-        }
-    }, 30000); // 每30秒刷新
-}
-
-// SSE 实时更新管理
-let activeTaskEventSource = null;
-let activeAgentEventSource = null;
-
-/**
- * 订阅任务实时更新 (SSE)
- */
-function subscribeTaskEvents(taskId) {
-    // 关闭之前的连接
-    if (activeTaskEventSource) {
-        activeTaskEventSource.close();
-        activeTaskEventSource = null;
-    }
-
-    try {
-        const es = new EventSource(`/api/tasks/${taskId}/events`);
-        activeTaskEventSource = es;
-
-        es.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                handleTaskSseEvent(data);
-            } catch (e) {
-                console.warn('Failed to parse task SSE event:', e);
-            }
-        };
-
-        es.onerror = () => {
-            console.warn('Task SSE connection error for:', taskId);
-        };
-    } catch (e) {
-        console.warn('EventSource not supported or failed:', e);
-    }
-}
-
-/**
- * 订阅 Agent 实时更新 (SSE)
- */
-function subscribeAgentEvents(taskId) {
-    if (activeAgentEventSource) {
-        activeAgentEventSource.close();
-        activeAgentEventSource = null;
-    }
-
-    try {
-        const es = new EventSource(`/api/tasks/${taskId}/agents/events`);
-        activeAgentEventSource = es;
-
-        es.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
-                handleAgentSseEvent(data);
-            } catch (e) {
-                console.warn('Failed to parse agent SSE event:', e);
-            }
-        };
-
-        es.onerror = () => {
-            console.warn('Agent SSE connection error for task:', taskId);
-        };
-    } catch (e) {
-        console.warn('EventSource not supported or failed:', e);
-    }
-}
-
-/**
- * 处理任务 SSE 事件
- */
-function handleTaskSseEvent(data) {
-    if (data.type === 'connected') return;
-
-    // 如果当前在任务详情页，刷新详情
-    if (state.currentPage === 'task-detail' && state.currentTaskId) {
-        loadTaskDetail(state.currentTaskId);
-    }
-
-    // 始终更新任务列表数据
-    loadTasks().catch(() => {});
-}
-
-/**
- * 处理 Agent SSE 事件
- */
-function handleAgentSseEvent(data) {
-    if (data.type === 'connected') return;
-
-    // 如果当前在任务详情页，刷新 agent 信息
-    if (state.currentPage === 'task-detail') {
-        loadTaskDetail(state.currentTaskId);
-    }
-}
-
-/**
- * 停止所有 SSE 连接
- */
-function stopSseSubscriptions() {
-    if (activeTaskEventSource) {
-        activeTaskEventSource.close();
-        activeTaskEventSource = null;
-    }
-    if (activeAgentEventSource) {
-        activeAgentEventSource.close();
-        activeAgentEventSource = null;
-    }
-}
-
-// 刷新仪表板
-window.refreshDashboard = function() {
-    loadDashboard();
-    showToast('已刷新仪表板', 'info');
-};
-
-// Toast通知
-function showToast(message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    if (!container) return;
-    
-    const icons = {
-        success: '✅',
-        error: '❌',
-        warning: '⚠️',
-        info: 'ℹ️'
-    };
-    
-    const toast = document.createElement('div');
-    toast.className = `toast ${type}`;
-    toast.innerHTML = `
-        <span class="toast-icon">${icons[type]}</span>
-        <span class="toast-message">${escapeHtml(message)}</span>
-        <button class="toast-close" onclick="this.parentElement.remove()">×</button>
-    `;
-    
-    container.appendChild(toast);
-    
-    // 3秒后自动移除
-    setTimeout(() => {
-        toast.style.animation = 'fadeOut 0.3s ease forwards';
-        setTimeout(() => toast.remove(), 300);
-    }, 3000);
-}
-
-// 加载状态
-function showLoading(show) {
-    const overlay = document.getElementById('loading-overlay');
-    if (overlay) {
-        if (show) {
-            overlay.classList.add('active');
-        } else {
-            overlay.classList.remove('active');
-        }
-    }
-}
 
 // 工具函数
+function $(selector) {
+  return document.querySelector(selector);
+}
+
+function formatDate(date) {
+  return new Date(date).toLocaleString('zh-CN');
+}
+
+function timeAgo(date) {
+  const seconds = Math.floor((Date.now() - new Date(date)) / 1000);
+  if (seconds < 60) return '刚刚';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}分钟前`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}小时前`;
+  return `${Math.floor(seconds / 86400)}天前`;
+}
+
+// API 请求
+async function api(path, options = {}) {
+  const res = await fetch(`${API_BASE}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...options
+  });
+  if (!res.ok) throw new Error(`API Error: ${res.status}`);
+  return res.json();
+}
+
+// 获取任务列表
+async function fetchTasks() {
+  state.loading = true;
+  render();
+  
+  try {
+    const params = state.filter !== 'all' ? `?status=${state.filter}` : '';
+    state.tasks = await api(`/api/tasks${params}`);
+  } catch (e) {
+    console.error('Failed to fetch tasks:', e);
+  }
+  
+  state.loading = false;
+  render();
+}
+
+// 获取任务详情
+async function fetchTask(taskId) {
+  state.loading = true;
+  render();
+  
+  try {
+    state.currentTask = await api(`/api/tasks/${taskId}`);
+    state.currentTab = 'overview';
+  } catch (e) {
+    console.error('Failed to fetch task:', e);
+  }
+  
+  state.loading = false;
+  render();
+}
+
+// 获取任务日志
+async function fetchTaskLogs(taskId) {
+  try {
+    return await api(`/api/tasks/${taskId}/logs`);
+  } catch (e) {
+    console.error('Failed to fetch logs:', e);
+    return [];
+  }
+}
+
+// 获取子任务
+async function fetchSubtasks(taskId) {
+  try {
+    return await api(`/api/tasks/${taskId}/subtasks`);
+  } catch (e) {
+    console.error('Failed to fetch subtasks:', e);
+    return [];
+  }
+}
+
+// 获取成品文件
+async function fetchArtifacts(taskId) {
+  try {
+    return await api(`/api/tasks/${taskId}/artifacts`);
+  } catch (e) {
+    console.error('Failed to fetch artifacts:', e);
+    return [];
+  }
+}
+
+// 创建任务
+async function createTask(title, description) {
+  try {
+    const task = await api('/api/tasks', {
+      method: 'POST',
+      body: JSON.stringify({ title, description })
+    });
+    state.tasks.unshift(task);
+    render();
+    return task;
+  } catch (e) {
+    console.error('Failed to create task:', e);
+    throw e;
+  }
+}
+
+// 启动任务
+async function startTask(taskId) {
+  try {
+    await api(`/api/tasks/${taskId}/start`, { method: 'POST' });
+    await fetchTask(taskId);
+  } catch (e) {
+    console.error('Failed to start task:', e);
+  }
+}
+
+// 暂停任务
+async function pauseTask(taskId) {
+  try {
+    await api(`/api/tasks/${taskId}/pause`, { method: 'POST' });
+    await fetchTask(taskId);
+  } catch (e) {
+    console.error('Failed to pause task:', e);
+  }
+}
+
+// 恢复任务
+async function resumeTask(taskId) {
+  try {
+    await api(`/api/tasks/${taskId}/resume`, { method: 'POST' });
+    await fetchTask(taskId);
+  } catch (e) {
+    console.error('Failed to resume task:', e);
+  }
+}
+
+// 重试任务
+async function retryTask(taskId) {
+  try {
+    await api(`/api/tasks/${taskId}/retry`, { method: 'POST' });
+    await fetchTask(taskId);
+  } catch (e) {
+    console.error('Failed to retry task:', e);
+  }
+}
+
+// WebSocket 连接
+function connectWebSocket(taskId) {
+  if (state.ws) {
+    state.ws.close();
+  }
+
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  state.ws = new WebSocket(`${protocol}//${location.host}?taskId=${taskId}`);
+
+  state.ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    console.log('WebSocket event:', data);
+
+    handleWebSocketEvent(data);
+  };
+
+  state.ws.onerror = (e) => {
+    console.error('WebSocket error:', e);
+  };
+
+  state.ws.onclose = () => {
+    console.log('WebSocket closed');
+  };
+}
+
+// 处理WebSocket事件
+function handleWebSocketEvent(event) {
+  const taskId = state.currentTask?.id;
+
+  switch (event.type) {
+    case 'status_change':
+      if (state.currentTask && state.currentTask.id === event.data.taskId) {
+        state.currentTask.status = event.data.newStatus;
+        render();
+      }
+      fetchTasks();
+      break;
+
+    case 'log_entry':
+      if (taskId && state.currentTab === 'logs') {
+        // 追加新日志到列表
+        state.tabData.logs.push(event.data);
+        appendLogToTimeline(event.data);
+        scrollLogsToBottom();
+      }
+      break;
+
+    case 'artifact_created':
+      if (taskId) {
+        // 更新成品列表
+        if (!state.currentTask.artifacts) {
+          state.currentTask.artifacts = [];
+        }
+        state.currentTask.artifacts.push(event.data);
+        // 如果在成品Tab，刷新显示
+        if (state.currentTab === 'artifacts') {
+          prependArtifact(event.data);
+        }
+        showNotification('新文件: ' + event.data.name);
+      }
+      break;
+
+    case 'subtask_created':
+      if (taskId && state.currentTab === 'subtasks') {
+        state.tabData.subtasks.push(event.data);
+        prependSubtask(event.data);
+      }
+      break;
+
+    case 'progress_update':
+      if (state.currentTask && state.currentTask.id === event.data.taskId) {
+        state.currentTask.progress = event.data.percent;
+        updateProgressBar(event.data.percent, event.data.message);
+      }
+      break;
+
+    case 'error':
+      console.error('Task error:', event.data);
+      showNotification('错误: ' + event.data.message, 'error');
+      break;
+
+    default:
+      console.log('Unknown event type:', event.type);
+  }
+}
+
+// 辅助函数
 function escapeHtml(text) {
-    if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 function getStatusText(status) {
-    const map = {
-        'pending': '待处理',
-        'in-progress': '进行中',
-        'completed': '已完成',
-        'failed': '失败',
-        'blocked': '阻塞',
-        'running': '运行中',
-        'idle': '空闲',
-        'error': '异常'
-    };
-    return map[status] || status;
+  const map = {
+    pending: '待执行',
+    running: '执行中',
+    paused: '已暂停',
+    completed: '已完成',
+    failed: '失败'
+  };
+  return map[status] || status;
 }
 
-function getPriorityText(priority) {
-    const map = {
-        'low': '低',
-        'medium': '中',
-        'high': '高',
-        'critical': '紧急'
-    };
-    return map[priority] || priority;
+function getRoleName(role) {
+  const map = {
+    'task-analyzer': '任务分析师',
+    'product-manager': '产品经理',
+    'architect': '架构师',
+    'backend-dev': '后端开发',
+    'frontend-dev': '前端开发',
+    'tester': '测试工程师',
+    'doc-writer': '文档编写'
+  };
+  return map[role] || role;
 }
 
-function getTaskTypeText(type) {
-    const map = {
-        'requirement-analysis': '📝 需求分析',
-        'architecture-design': '🏗️ 架构设计',
-        'development': '💻 开发',
-        'testing': '🧪 测试',
-        'documentation': '📖 文档',
-        'code-review': '👀 代码审查',
-        'refactoring': '♻️ 重构',
-        'bug-fix': '🐛 Bug修复'
-    };
-    return map[type] || type;
+// 获取文件图标
+function getFileIcon(type) {
+  const icons = {
+    code: '📄',
+    document: '📝',
+    diagram: '📊',
+    test: '🧪',
+    config: '⚙️',
+    data: '📦'
+  };
+  return icons[type] || '📎';
 }
 
-function formatDate(dateString) {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return date.toLocaleString('zh-CN');
+// 格式化文件大小
+function formatFileSize(bytes) {
+  if (!bytes) return '0 B';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-function formatRelativeTime(dateString) {
-    if (!dateString) return '未知';
-    
-    const date = new Date(dateString);
-    const now = new Date();
-    const diff = now - date;
-    
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-    
-    if (minutes < 1) return '刚刚';
-    if (minutes < 60) return `${minutes}分钟前`;
-    if (hours < 24) return `${hours}小时前`;
-    if (days < 7) return `${days}天前`;
-    
-    return formatDate(dateString);
+// 追加日志到时间线
+function appendLogToTimeline(log) {
+  const timelineEl = document.querySelector('.timeline');
+  if (!timelineEl) return;
+
+  // 适配 API 返回字段
+  const type = log.type || 'info';
+  const icon = log.icon || LOG_ICONS[type] || '•';
+  const levelClass = log.level === 'error' ? 'error' : '';
+  const content = log.description || log.content || '';
+  const metadata = log.metadata || log.details;
+
+  // 判断是否需要渲染 Markdown
+  const shouldRenderMd = shouldRenderAsMarkdown(content, type);
+  const renderedContent = shouldRenderMd
+    ? `<div class="log-markdown markdown-body">${renderMarkdown(content)}</div>`
+    : escapeHtml(content);
+
+  const toggleBtn = shouldRenderMd
+    ? `<button class="btn-toggle-md" onclick="toggleLogMarkdown(this)" title="切换源码/渲染">📝</button>`
+    : '';
+
+  const itemHtml = `
+    <div class="timeline-item ${levelClass}" data-id="${log.id}" data-type="${type}">
+      <div class="timeline-icon">${icon}</div>
+      <div class="timeline-content">
+        <div class="timeline-time">${formatDate(log.timestamp)}</div>
+        <div class="timeline-type">${type} ${toggleBtn}</div>
+        <div class="timeline-desc" data-raw="${escapeHtml(content)}" data-rendered="${shouldRenderMd ? 'true' : 'false'}">
+          ${renderedContent}
+        </div>
+        ${metadata ? renderLogMetadata(metadata, type) : ''}
+      </div>
+    </div>
+  `;
+
+  timelineEl.insertAdjacentHTML('beforeend', itemHtml);
+  scrollLogsToBottom();
 }
 
-// 导出到全局作用域
-window.executeTask = executeTask;
-window.refreshTask = refreshTask;
-window.deleteTask = deleteTask;
-window.retryTask = retryTask;
-window.executeWorkflow = executeWorkflow;
-window.showTaskDetail = showTaskDetail;
-window.showCreateTaskModal = showCreateTaskModal;
-window.showCreateAgentModal = showCreateAgentModal;
-window.refreshAgents = refreshAgents;
-window.refreshDashboard = refreshDashboard;
-window.switchToPage = switchToPage;
+// 渲染日志元数据（工具调用详情）
+function renderLogMetadata(metadata, type) {
+  if (type === 'tool_call' && metadata.toolName) {
+    return `
+      <div class="tool-details">
+        <div class="tool-name">🔧 ${escapeHtml(metadata.toolName)}</div>
+        ${metadata.toolInput ? `<pre class="tool-input"><code>${escapeHtml(JSON.stringify(metadata.toolInput, null, 2))}</code></pre>` : ''}
+        ${metadata.duration ? `<div class="tool-duration">⏱️ ${metadata.duration}ms</div>` : ''}
+      </div>
+    `;
+  }
+  if (type === 'tool_result' && metadata.toolOutput) {
+    return `
+      <div class="tool-result">
+        <pre class="tool-output"><code>${escapeHtml(typeof metadata.toolOutput === 'string' ? metadata.toolOutput : JSON.stringify(metadata.toolOutput, null, 2))}</code></pre>
+      </div>
+    `;
+  }
+  return '';
+}
 
-// Task Output Functions
-window.refreshTaskOutput = refreshTaskOutput;
-window.loadTaskOutput = loadTaskOutput;
-window.loadFilePreview = loadFilePreview;
+// 滚动日志到底部
+function scrollLogsToBottom() {
+  const tabContent = document.getElementById('tab-content');
+  if (tabContent) {
+    tabContent.scrollTop = tabContent.scrollHeight;
+  }
+}
 
-let currentOutputTree = [];
-let currentSelectedFile = null;
+// 追加成品到列表
+function prependArtifact(artifact) {
+  const container = document.querySelector('.artifacts-list');
+  if (!container) return;
 
-async function loadTaskOutput(taskId) {
-    const container = document.getElementById('output-file-tree');
-    const preview = document.getElementById('output-preview');
-    
-    if (!container) return;
-    
-    try {
-        const data = await apiCall(`/tasks/${taskId}/output`);
-        const output = data.data;
-        
-        if (!output || !output.files || output.files.length === 0) {
-            container.innerHTML = '<div class="preview-empty" style="padding: 1rem;">暂无成果文件</div>';
-            if (preview) {
-                preview.innerHTML = '<div class="preview-empty">暂无成果</div>';
-            }
-            currentOutputTree = [];
-            return;
-        }
-        
-        currentOutputTree = buildFileTree(output.files);
-        renderFileTree(currentOutputTree, container, '');
-        
-    } catch (error) {
-        console.error('加载任务成果失败:', error);
-        container.innerHTML = '<div class="preview-empty" style="padding: 1rem; color: var(--danger-color);">加载失败</div>';
+  const itemHtml = renderArtifactItem(artifact);
+  container.insertAdjacentHTML('afterbegin', itemHtml);
+}
+
+// 渲染单个成品项
+function renderArtifactItem(artifact) {
+  const icon = getFileIcon(artifact.type);
+  return `
+    <div class="artifact-item" data-id="${artifact.id}">
+      <div class="artifact-icon">${icon}</div>
+      <div class="artifact-info">
+        <div class="artifact-name">${escapeHtml(artifact.name)}</div>
+        <div class="artifact-meta">${formatFileSize(artifact.size)} · ${timeAgo(artifact.createdAt)}</div>
+      </div>
+      <div class="artifact-actions">
+        <button class="btn-icon" onclick="previewArtifact('${artifact.id}')" title="预览">👁</button>
+        <button class="btn-icon" onclick="downloadArtifact('${artifact.id}')" title="下载">⬇</button>
+      </div>
+    </div>
+  `;
+}
+
+// 追加子任务到列表
+function prependSubtask(subtask) {
+  const container = document.querySelector('.subtask-list');
+  if (!container) return;
+
+  const statusIcon = subtask.status === 'completed' ? '✓' : subtask.status === 'running' ? '●' : '○';
+  const itemHtml = `
+    <div class="subtask-item" onclick="viewTask('${subtask.id}')">
+      <div class="subtask-status ${subtask.status}">${statusIcon}</div>
+      <div class="subtask-info">
+        <div class="subtask-title">${escapeHtml(subtask.title)}</div>
+        <div class="subtask-role">${getRoleName(subtask.role)}</div>
+      </div>
+      <span class="status-badge ${subtask.status}">${getStatusText(subtask.status)}</span>
+    </div>
+  `;
+  container.insertAdjacentHTML('afterbegin', itemHtml);
+}
+
+// 更新进度条
+function updateProgressBar(percent, message) {
+  const progressEl = document.querySelector('.progress-fill');
+  const textEl = document.querySelector('.progress-text');
+  if (progressEl) progressEl.style.width = percent + '%';
+  if (textEl) textEl.textContent = message || percent + '%';
+}
+
+// 显示通知
+function showNotification(message, type = 'info') {
+  const notification = document.createElement('div');
+  notification.className = `notification notification-${type}`;
+  notification.innerHTML = `
+    <span class="notification-icon">${type === 'error' ? '❌' : type === 'success' ? '✓' : 'ℹ️'}</span>
+    <span class="notification-message">${escapeHtml(message)}</span>
+  `;
+  document.body.appendChild(notification);
+
+  setTimeout(() => {
+    notification.classList.add('fade-out');
+    setTimeout(() => notification.remove(), 300);
+  }, 3000);
+}
+
+// 预览成品
+async function previewArtifact(artifactId) {
+  try {
+    const artifact = state.currentTask?.artifacts?.find(a => a.id === artifactId);
+    if (!artifact) {
+      showNotification('文件不存在', 'error');
+      return;
     }
-}
 
-function buildFileTree(files) {
-    const tree = {};
-    
-    for (const file of files) {
-        const parts = file.path.split('/');
-        let current = tree;
-        
-        for (let i = 0; i < parts.length; i++) {
-            const part = parts[i];
-            const isLast = i === parts.length - 1;
-            
-            if (isLast) {
-                current[part] = { 
-                    ...file, 
-                    type: 'file',
-                    name: part 
-                };
-            } else {
-                if (!current[part]) {
-                    current[part] = { 
-                        type: 'folder', 
-                        name: part,
-                        children: {} 
-                    };
-                }
-                current = current[part].children;
-            }
-        }
-    }
-    
-    return tree;
-}
+    // 获取文件内容
+    const response = await api(`/api/artifacts/${artifactId}/content`);
+    const content = response.content || response;
+    const fileName = artifact.name.toLowerCase();
+    const ext = fileName.split('.').pop();
 
-function renderFileTree(tree, container, prefix = '', depth = 0) {
-    if (!container) return;
-    
-    let html = '';
-    const entries = Object.entries(tree).sort((a, b) => {
-        const aIsFolder = a[1].type === 'folder';
-        const bIsFolder = b[1].type === 'folder';
-        if (aIsFolder && !bIsFolder) return -1;
-        if (!aIsFolder && bIsFolder) return 1;
-        return a[0].localeCompare(b[0]);
+    // 判断文件类型
+    const fileInfo = detectFileType(fileName, ext);
+
+    // 构建预览内容
+    const contentHtml = buildPreviewContent(artifact, content, fileInfo, artifactId);
+
+    showModal({
+      title: artifact.name,
+      content: contentHtml,
+      actions: [
+        { label: '下载', primary: true, onClick: () => downloadArtifact(artifactId) },
+        { label: '关闭', onClick: hideModal }
+      ]
     });
+
+    // 如果是可渲染类型，初始化渲染
+    if (fileInfo.canRender && fileInfo.type !== 'image') {
+      setTimeout(() => renderPreviewContent(artifactId, content, fileInfo), 100);
+    }
+  } catch (e) {
+    console.error('Failed to preview artifact:', e);
+    showNotification('预览失败: ' + e.message, 'error');
+  }
+}
+
+// 检测文件类型
+function detectFileType(fileName, ext) {
+  const imageExts = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'];
+  const htmlExts = ['html', 'htm'];
+  const mdExts = ['md', 'markdown'];
+  const jsonExts = ['json', 'jsonc', 'json5'];
+  const codeExts = ['js', 'ts', 'jsx', 'tsx', 'css', 'scss', 'sass', 'less', 'py', 'java', 'go', 'rs', 'c', 'cpp', 'h', 'sh', 'bash', 'yaml', 'yml', 'xml', 'sql'];
+  const textExts = ['txt', 'log', 'csv', 'tsv'];
+  const fontExts = ['woff', 'woff2', 'ttf', 'otf', 'eot'];
+
+  if (imageExts.includes(ext)) {
+    return { type: 'image', canRender: true, canToggle: false };
+  }
+  if (htmlExts.includes(ext)) {
+    return { type: 'html', canRender: true, canToggle: true };
+  }
+  if (mdExts.includes(ext)) {
+    return { type: 'markdown', canRender: true, canToggle: true };
+  }
+  if (jsonExts.includes(ext)) {
+    return { type: 'json', canRender: true, canToggle: true };
+  }
+  if (codeExts.includes(ext)) {
+    return { type: 'code', canRender: false, canToggle: false, lang: ext };
+  }
+  if (textExts.includes(ext)) {
+    return { type: 'text', canRender: false, canToggle: false };
+  }
+  if (fontExts.includes(ext)) {
+    return { type: 'font', canRender: true, canToggle: false };
+  }
+  return { type: 'binary', canRender: false, canToggle: false };
+}
+
+// 构建预览内容HTML
+function buildPreviewContent(artifact, content, fileInfo, artifactId) {
+  const fileName = artifact.name;
+  const ext = fileName.split('.').pop().toLowerCase();
+
+  // 切换按钮
+  const toggleBtn = fileInfo.canToggle ? `
+    <div class="preview-toolbar">
+      <button class="btn btn-sm" id="preview-toggle-btn" onclick="togglePreviewMode('${artifactId}')">
+        <span class="toggle-icon">👁</span>
+        <span class="toggle-text">渲染视图</span>
+      </button>
+    </div>
+  ` : '';
+
+  // 预览区域
+  let previewArea = '';
+
+  if (fileInfo.type === 'image') {
+    previewArea = `
+      <div class="preview-image-container">
+        <img src="/api/artifacts/${artifactId}/download" alt="${escapeHtml(fileName)}" class="preview-image">
+      </div>
+    `;
+  } else if (fileInfo.type === 'html') {
+    previewArea = `
+      <div class="preview-container">
+        <div id="preview-rendered-${artifactId}" class="preview-rendered" style="display: none;"></div>
+        <div id="preview-source-${artifactId}" class="preview-source">
+          <pre class="code-preview"><code class="lang-html">${highlightSyntax(escapeHtml(content), 'html')}</code></pre>
+        </div>
+      </div>
+    `;
+  } else if (fileInfo.type === 'markdown') {
+    previewArea = `
+      <div class="preview-container">
+        <div id="preview-rendered-${artifactId}" class="preview-rendered markdown-body" style="display: none;"></div>
+        <div id="preview-source-${artifactId}" class="preview-source">
+          <pre class="code-preview"><code class="lang-markdown">${highlightSyntax(escapeHtml(content), 'markdown')}</code></pre>
+        </div>
+      </div>
+    `;
+  } else if (fileInfo.type === 'json') {
+    previewArea = `
+      <div class="preview-container">
+        <div id="preview-rendered-${artifactId}" class="preview-rendered json-viewer" style="display: none;"></div>
+        <div id="preview-source-${artifactId}" class="preview-source">
+          <pre class="code-preview"><code class="lang-json">${highlightSyntax(escapeHtml(content), 'json')}</code></pre>
+        </div>
+      </div>
+    `;
+  } else if (fileInfo.type === 'code') {
+    previewArea = `
+      <div class="preview-container">
+        <pre class="code-preview"><code class="lang-${fileInfo.lang}">${highlightSyntax(escapeHtml(content), fileInfo.lang)}</code></pre>
+      </div>
+    `;
+  } else if (fileInfo.type === 'text') {
+    previewArea = `
+      <div class="preview-container">
+        <pre class="code-preview"><code>${escapeHtml(content)}</code></pre>
+      </div>
+    `;
+  } else if (fileInfo.type === 'font') {
+    previewArea = `
+      <div class="preview-font-container">
+        <div class="font-preview" style="font-family: 'PreviewFont';">
+          <div class="font-sample" style="font-size: 48px;">AaBbCc 123 字体预览</div>
+          <div class="font-sample" style="font-size: 24px;">The quick brown fox jumps over the lazy dog.</div>
+          <div class="font-sample" style="font-size: 16px;">敏捷的棕色狐狸跳过了懒狗。</div>
+        </div>
+        <style>
+          @font-face {
+            font-family: 'PreviewFont';
+            src: url('/api/artifacts/${artifactId}/download');
+          }
+        </style>
+      </div>
+    `;
+  } else {
+    previewArea = `
+      <div class="preview-placeholder">
+        <div class="placeholder-icon">📄</div>
+        <div class="placeholder-text">此文件类型不支持预览</div>
+        <div class="placeholder-hint">文件: ${escapeHtml(fileName)}</div>
+        <button class="btn btn-primary" onclick="downloadArtifact('${artifactId}')">下载文件</button>
+      </div>
+    `;
+  }
+
+  return toggleBtn + previewArea;
+}
+
+// 渲染预览内容
+function renderPreviewContent(artifactId, content, fileInfo) {
+  if (fileInfo.type === 'html') {
+    const container = document.getElementById(`preview-rendered-${artifactId}`);
+    if (container) {
+      // 使用 iframe 安全渲染 HTML
+      container.innerHTML = `
+        <iframe class="html-preview-frame" sandbox="allow-same-origin"></iframe>
+      `;
+      const iframe = container.querySelector('iframe');
+      if (iframe) {
+        iframe.srcdoc = content;
+      }
+    }
+  } else if (fileInfo.type === 'markdown') {
+    const container = document.getElementById(`preview-rendered-${artifactId}`);
+    if (container) {
+      container.innerHTML = renderMarkdown(content);
+    }
+  } else if (fileInfo.type === 'json') {
+    const container = document.getElementById(`preview-rendered-${artifactId}`);
+    if (container) {
+      try {
+        const parsed = JSON.parse(content);
+        container.innerHTML = renderJsonTree(parsed);
+      } catch (e) {
+        container.innerHTML = `<pre class="code-preview"><code>${escapeHtml(content)}</code></pre>`;
+      }
+    }
+  }
+}
+
+// 切换预览模式
+window.previewModes = {};
+function togglePreviewMode(artifactId) {
+  const rendered = document.getElementById(`preview-rendered-${artifactId}`);
+  const source = document.getElementById(`preview-source-${artifactId}`);
+  const btn = document.getElementById('preview-toggle-btn');
+
+  if (!rendered || !source) return;
+
+  const currentMode = window.previewModes[artifactId] || 'source';
+
+  if (currentMode === 'source') {
+    rendered.style.display = 'block';
+    source.style.display = 'none';
+    btn.querySelector('.toggle-text').textContent = '源码视图';
+    btn.querySelector('.toggle-icon').textContent = '📝';
+    window.previewModes[artifactId] = 'rendered';
+  } else {
+    rendered.style.display = 'none';
+    source.style.display = 'block';
+    btn.querySelector('.toggle-text').textContent = '渲染视图';
+    btn.querySelector('.toggle-icon').textContent = '👁';
+    window.previewModes[artifactId] = 'source';
+  }
+}
+window.togglePreviewMode = togglePreviewMode;
+
+// 简单的 Markdown 渲染
+function renderMarkdown(text) {
+  if (!text) return '';
+
+  let html = escapeHtml(text);
+
+  // 代码块
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (match, lang, code) => {
+    return `<pre class="md-code-block"><code class="lang-${lang}">${code.trim()}</code></pre>`;
+  });
+
+  // 行内代码
+  html = html.replace(/`([^`]+)`/g, '<code class="md-inline-code">$1</code>');
+
+  // 标题
+  html = html.replace(/^###### (.+)$/gm, '<h6>$1</h6>');
+  html = html.replace(/^##### (.+)$/gm, '<h5>$1</h5>');
+  html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // 粗体和斜体
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/___(.+?)___/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+
+  // 链接
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // 列表
+  html = html.replace(/^\s*[-*+]\s+(.+)$/gm, '<li>$1</li>');
+  html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+  // 有序列表
+  html = html.replace(/^\s*\d+\.\s+(.+)$/gm, '<li>$1</li>');
+
+  // 引用
+  html = html.replace(/^&gt;\s+(.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // 水平线
+  html = html.replace(/^---+$/gm, '<hr>');
+
+  // 段落
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = '<p>' + html + '</p>';
+
+  // 清理空段落
+  html = html.replace(/<p>\s*<\/p>/g, '');
+
+  return html;
+}
+
+// 渲染 JSON 树形视图
+function renderJsonTree(data, depth = 0) {
+  if (depth > 10) return '<span class="json-ellipsis">...</span>';
+
+  const indent = '  '.repeat(depth);
+  const nextIndent = '  '.repeat(depth + 1);
+
+  if (data === null) {
+    return '<span class="json-null">null</span>';
+  }
+
+  if (typeof data === 'boolean') {
+    return `<span class="json-boolean">${data}</span>`;
+  }
+
+  if (typeof data === 'number') {
+    return `<span class="json-number">${data}</span>`;
+  }
+
+  if (typeof data === 'string') {
+    const escaped = escapeHtml(data);
+    if (data.length > 100) {
+      return `<span class="json-string">"${escaped.substring(0, 100)}..."</span>`;
+    }
+    return `<span class="json-string">"${escaped}"</span>`;
+  }
+
+  if (Array.isArray(data)) {
+    if (data.length === 0) return '<span class="json-bracket">[]</span>';
+    const items = data.map(item => nextIndent + renderJsonTree(item, depth + 1)).join(',\n');
+    return `<span class="json-bracket">[</span>\n${items}\n${indent}<span class="json-bracket">]</span>`;
+  }
+
+  if (typeof data === 'object') {
+    const keys = Object.keys(data);
+    if (keys.length === 0) return '<span class="json-bracket">{}</span>';
+    const items = keys.map(key => {
+      const keyHtml = `<span class="json-key">"${escapeHtml(key)}"</span>`;
+      return `${nextIndent}${keyHtml}: ${renderJsonTree(data[key], depth + 1)}`;
+    }).join(',\n');
+    return `<span class="json-bracket">{</span>\n${items}\n${indent}<span class="json-bracket">}</span>`;
+  }
+
+  return String(data);
+}
+
+// 语法高亮
+function highlightSyntax(code, lang) {
+  if (!code) return '';
+
+  // 通用高亮
+  let highlighted = code;
+
+  if (lang === 'json') {
+    highlighted = code
+      .replace(/"([^"]+)":/g, '<span class="hl-key">"$1"</span>:')
+      .replace(/:\s*"([^"]*)"/g, ': <span class="hl-string">"$1"</span>')
+      .replace(/:\s*(\d+\.?\d*)/g, ': <span class="hl-number">$1</span>')
+      .replace(/:\s*(true|false|null)/g, ': <span class="hl-boolean">$1</span>');
+  } else if (lang === 'html') {
+    highlighted = code
+      .replace(/(&lt;\/?)([\w-]+)/g, '$1<span class="hl-tag">$2</span>')
+      .replace(/([\w-]+)=/g, '<span class="hl-attr">$1</span>=')
+      .replace(/"([^"]*)"/g, '<span class="hl-string">"$1"</span>');
+  } else if (['js', 'ts', 'jsx', 'tsx'].includes(lang)) {
+    highlighted = code
+      .replace(/\b(const|let|var|function|return|if|else|for|while|class|import|export|from|async|await|try|catch|throw|new|this)\b/g, '<span class="hl-keyword">$1</span>')
+      .replace(/"([^"]*)"/g, '<span class="hl-string">"$1"</span>')
+      .replace(/'([^']*)'/g, "<span class=\"hl-string\">'$1'</span>")
+      .replace(/`([^`]*)`/g, '<span class="hl-string">`$1`</span>')
+      .replace(/\b(\d+\.?\d*)\b/g, '<span class="hl-number">$1</span>')
+      .replace(/\/\/(.*)$/gm, '<span class="hl-comment">//$1</span>')
+      .replace(/\/\*[\s\S]*?\*\//g, '<span class="hl-comment">$&</span>');
+  } else if (['css', 'scss', 'less'].includes(lang)) {
+    highlighted = code
+      .replace(/([\w-]+)\s*:/g, '<span class="hl-key">$1</span>:')
+      .replace(/:([^;{]+)/g, ': <span class="hl-string">$1</span>')
+      .replace(/(#[\da-fA-F]{3,8})\b/g, '<span class="hl-number">$1</span>')
+      .replace(/\.( [\w-]+)/g, '.<span class="hl-class">$1</span>');
+  } else if (lang === 'markdown') {
+    highlighted = code
+      .replace(/^(#{1,6})\s+(.+)$/gm, '<span class="hl-keyword">$1</span> <span class="hl-title">$2</span>')
+      .replace(/\*\*([^*]+)\*\*/g, '<span class="hl-bold">**$1**</span>')
+      .replace(/`([^`]+)`/g, '<span class="hl-string">`$1`</span>')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="hl-link">[$1]($2)</span>');
+  }
+
+  return highlighted;
+}
+
+// 下载成品
+async function downloadArtifact(artifactId) {
+  try {
+    const response = await fetch(`${API_BASE}/api/artifacts/${artifactId}/download`);
+    if (!response.ok) throw new Error('Download failed');
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+
+    // 从响应头或artifact信息获取文件名
+    const artifact = state.currentTask?.artifacts?.find(a => a.id === artifactId);
+    a.download = artifact?.name || 'download';
+
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+  } catch (e) {
+    console.error('Failed to download artifact:', e);
+    showNotification('下载失败: ' + e.message, 'error');
+  }
+}
+
+// 模态框函数
+let modalCallback = null;
+
+function showModal({ title, content, actions }) {
+  modalCallback = hideModal;
+
+  let actionsHtml = actions.map((action, index) => `
+    <button class="btn ${action.primary ? 'btn-success' : ''}" onclick="handleModalAction(${index})">${action.label}</button>
+  `).join('');
+
+  const modalHtml = `
+    <div class="modal-overlay" id="modal-overlay" onclick="hideModal()">
+      <div class="modal modal-large" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 class="modal-title">${escapeHtml(title)}</h3>
+          <button class="modal-close" onclick="hideModal()">×</button>
+        </div>
+        <div class="modal-body">
+          ${content}
+        </div>
+        <div class="modal-footer">
+          ${actionsHtml}
+        </div>
+      </div>
+    </div>
+  `;
+
+  document.body.insertAdjacentHTML('beforeend', modalHtml);
+
+  // 保存回调
+  window.modalActions = actions;
+}
+
+function hideModal() {
+  const overlay = document.getElementById('modal-overlay');
+  if (overlay) overlay.remove();
+  window.modalActions = null;
+}
+
+function handleModalAction(index) {
+  if (window.modalActions && window.modalActions[index]) {
+    window.modalActions[index].onClick();
+  }
+}
+
+// 渲染任务列表页
+function renderTaskList() {
+  const filteredTasks = state.filter === 'all' 
+    ? state.tasks 
+    : state.tasks.filter(t => t.status === state.filter);
+
+  let html = `
+    <div class="header">
+      <h1>🤖 Agent Team</h1>
+      <div class="header-status">
+        <span class="status-dot"></span>
+        <span>系统在线</span>
+      </div>
+    </div>
     
-    for (const [name, node] of entries) {
-        const fullPath = prefix ? `${prefix}/${name}` : name;
-        const isActive = currentSelectedFile === fullPath;
+    <div class="container">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+        <h2 class="page-title">任务列表</h2>
+        <button class="btn-primary" onclick="showCreateModal()">
+          <span>+</span> 新建任务
+        </button>
+      </div>
+      
+      <div class="filter-bar">
+        <button class="filter-btn ${state.filter === 'all' ? 'active' : ''}" onclick="setFilter('all')">全部</button>
+        <button class="filter-btn ${state.filter === 'pending' ? 'active' : ''}" onclick="setFilter('pending')">待执行</button>
+        <button class="filter-btn ${state.filter === 'running' ? 'active' : ''}" onclick="setFilter('running')">执行中</button>
+        <button class="filter-btn ${state.filter === 'completed' ? 'active' : ''}" onclick="setFilter('completed')">已完成</button>
+        <button class="filter-btn ${state.filter === 'failed' ? 'active' : ''}" onclick="setFilter('failed')">失败</button>
+      </div>
+  `;
+
+  if (state.loading) {
+    html += `<div class="loading"><div class="spinner"></div></div>`;
+  } else if (filteredTasks.length === 0) {
+    html += `
+      <div class="empty-state">
+        <div class="empty-state-icon">📋</div>
+        <div class="empty-state-text">暂无任务</div>
+      </div>
+    `;
+  } else {
+    html += `<div class="task-list">`;
+    for (const task of filteredTasks) {
+      html += `
+        <div class="task-card status-${task.status}" onclick="viewTask('${task.id}')">
+          <div class="task-card-header">
+            <div class="task-card-title">${escapeHtml(task.title)}</div>
+            <span class="status-badge ${task.status}">${getStatusText(task.status)}</span>
+          </div>
+          <div class="task-card-desc">${escapeHtml(task.description || '')}</div>
+          <div class="task-card-meta">
+            <span class="role-badge">👤 ${getRoleName(task.role)}</span>
+            <span>⏰ ${timeAgo(task.createdAt)}</span>
+          </div>
+        </div>
+      `;
+    }
+    html += `</div>`;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+// 渲染任务详情页
+function renderTaskDetail() {
+  const task = state.currentTask;
+  if (!task) return renderTaskList();
+
+  let html = `
+    <div class="header">
+      <h1>🤖 Agent Team</h1>
+      <button class="btn" onclick="goBack()">← 返回列表</button>
+    </div>
+    
+    <div class="container">
+      <div class="task-detail">
+        <div class="task-detail-header">
+          <h2 class="task-detail-title">${escapeHtml(task.title)}</h2>
+          <div class="task-detail-meta">
+            <span class="status-badge ${task.status}">${getStatusText(task.status)}</span>
+            <span class="role-badge">👤 ${getRoleName(task.role)}</span>
+            <span>创建: ${formatDate(task.createdAt)}</span>
+            ${task.completedAt ? `<span>完成: ${formatDate(task.completedAt)}</span>` : ''}
+          </div>
+          
+          <div class="task-actions">
+            ${task.status === 'pending' ? `<button class="btn btn-success" onclick="startTask('${task.id}')">▶ 开始执行</button>` : ''}
+            ${task.status === 'running' ? `<button class="btn btn-warning" onclick="pauseTask('${task.id}')">⏸ 暂停</button>` : ''}
+            ${task.status === 'paused' ? `<button class="btn btn-success" onclick="resumeTask('${task.id}')">▶ 继续</button>` : ''}
+            ${task.status === 'failed' ? `<button class="btn btn-danger" onclick="retryTask('${task.id}')">↻ 重试</button>` : ''}
+          </div>
+        </div>
         
-        if (node.type === 'folder') {
-            html += `
-                <div class="file-tree-item folder" data-path="${fullPath}" onclick="toggleFolder(this)">
-                    <span class="file-icon">📁</span>
-                    <span>${escapeHtml(name)}</span>
-                </div>
-                <div class="file-tree-children" id="folder-${fullPath.replace(/\//g, '-')}" style="display: none;">
-                    ${renderFileTree(node.children || {}, container, fullPath, depth + 1)}
-                </div>
-            `;
-        } else {
-            const icon = getFileIcon(name);
-            html += `
-                <div class="file-tree-item ${isActive ? 'active' : ''}" 
-                     data-path="${fullPath}" 
-                     onclick="selectFile('${escapeHtml(fullPath)}', '${escapeHtml(name)}', '${node.mimeType || ''}')">
-                    <span class="file-icon">${icon}</span>
-                    <span>${escapeHtml(name)}</span>
-                </div>
-            `;
-        }
-    }
-    
-    container.innerHTML = html || '<div class="preview-empty" style="padding: 1rem;">空目录</div>';
+        <div class="tabs">
+          <div class="tab ${state.currentTab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">📋 概览</div>
+          <div class="tab ${state.currentTab === 'logs' ? 'active' : ''}" onclick="setTab('logs')">📝 执行日志</div>
+          <div class="tab ${state.currentTab === 'subtasks' ? 'active' : ''}" onclick="setTab('subtasks')">🔀 子任务</div>
+          <div class="tab ${state.currentTab === 'artifacts' ? 'active' : ''}" onclick="setTab('artifacts')">📦 成品</div>
+        </div>
+        
+        <div class="tab-content" id="tab-content">
+          ${renderTabContentSync()}
+        </div>
+      </div>
+    </div>
+  `;
+
+  return html;
 }
 
-function toggleFolder(element) {
-    const path = element.dataset.path;
-    const children = document.getElementById(`folder-${path.replace(/\//g, '-')}`);
-    if (children) {
-        children.style.display = children.style.display === 'none' ? 'block' : 'none';
-    }
-}
+// 同步渲染标签页内容
+function renderTabContentSync() {
+  const task = state.currentTask;
+  if (!task) return '';
 
-function getFileIcon(filename) {
-    const ext = filename.split('.').pop()?.toLowerCase();
-    const icons = {
-        'js': '📜', 'ts': '📘', 'jsx': '⚛️', 'tsx': '⚛️',
-        'html': '🌐', 'css': '🎨', 'scss': '🎨',
-        'json': '📋', 'md': '📝', 'txt': '📄',
-        'png': '🖼️', 'jpg': '🖼️', 'svg': '🎨',
-        'py': '🐍', 'java': '☕', 'go': '🔷',
-        'rs': '🦀', 'cpp': '⚙️', 'c': '⚙️',
-        'sh': '💻', 'bash': '💻',
-        'zip': '📦', 'tar': '📦', 'gz': '📦'
-    };
-    return icons[ext] || '📄';
-}
+  if (state.currentTab === 'overview') {
+    return renderOverviewContent(task);
+  }
 
-async function selectFile(fullPath, filename, mimeType) {
-    currentSelectedFile = fullPath;
-    
-    const preview = document.getElementById('output-preview');
-    if (!preview) return;
-    
-    // Update active state in tree
-    document.querySelectorAll('.file-tree-item').forEach(item => {
-        item.classList.remove('active');
+  if (state.currentTab === 'logs') {
+    // 异步加载日志
+    fetchTaskLogs(task.id).then(logs => {
+      state.tabData.logs = logs;
+      const el = document.getElementById('tab-content');
+      if (el && state.currentTab === 'logs') {
+        el.innerHTML = renderLogsContent(logs);
+        scrollLogsToBottom();
+      }
     });
-    const activeItem = document.querySelector(`.file-tree-item[data-path="${fullPath}"]`);
-    if (activeItem) {
-        activeItem.classList.add('active');
-    }
-    
-    // Show loading
-    preview.innerHTML = '<div class="preview-loading">加载中...</div>';
-    
-    try {
-        const taskId = state.currentTaskId;
-        const data = await apiCall(`/tasks/${taskId}/output/files/${encodeURIComponent(fullPath)}`);
-        const fileData = data.data;
-        
-        renderFilePreview(fileData, preview, filename);
-        
-    } catch (error) {
-        console.error('加载文件预览失败:', error);
-        preview.innerHTML = `<div class="preview-error">无法加载文件: ${escapeHtml(error.message)}</div>`;
-    }
+    return `<div class="loading"><div class="spinner"></div></div>`;
+  }
+
+  if (state.currentTab === 'subtasks') {
+    // 异步加载子任务
+    fetchSubtasks(task.id).then(subtasks => {
+      state.tabData.subtasks = subtasks;
+      const el = document.getElementById('tab-content');
+      if (el && state.currentTab === 'subtasks') {
+        el.innerHTML = renderSubtasksContent(subtasks);
+      }
+    });
+    return `<div class="loading"><div class="spinner"></div></div>`;
+  }
+
+  if (state.currentTab === 'artifacts') {
+    // 异步加载成品
+    fetchArtifacts(task.id).then(artifacts => {
+      state.currentTask.artifacts = artifacts;
+      const el = document.getElementById('tab-content');
+      if (el && state.currentTab === 'artifacts') {
+        el.innerHTML = renderArtifactsContent(artifacts);
+      }
+    });
+    return `<div class="loading"><div class="spinner"></div></div>`;
+  }
+
+  return '';
 }
 
-function renderFilePreview(fileData, container, filename) {
-    if (!fileData || !fileData.preview) {
-        container.innerHTML = '<div class="preview-empty">无法预览此文件</div>';
-        return;
-    }
-    
-    const ext = filename.split('.').pop()?.toLowerCase();
-    const codeExtensions = ['js', 'ts', 'jsx', 'tsx', 'html', 'css', 'scss', 'json', 'md', 'py', 'java', 'go', 'rs', 'cpp', 'c', 'sh', 'bash', 'txt', 'yml', 'yaml'];
-    const imageExtensions = ['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp'];
-    
-    let html = '';
-    
-    if (imageExtensions.includes(ext)) {
-        html = `<img src="${fileData.preview}" alt="${escapeHtml(filename)}" class="preview-image" onerror="this.outerHTML='<div class=preview-error>图片加载失败</div>'">`;
-    } else if (codeExtensions.includes(ext)) {
-        html = `<pre class="preview-code"><code>${escapeHtml(fileData.preview)}</code></pre>`;
-    } else if (ext === 'md') {
-        html = `<div class="preview-markdown">${renderSimpleMarkdown(fileData.preview)}</div>`;
+// 渲染概览内容
+function renderOverviewContent(task) {
+  const progress = task.progress || 0;
+  return `
+    <div class="overview-section">
+      <div class="form-group">
+        <label class="form-label">任务描述</label>
+        <p class="task-description">${escapeHtml(task.description || '无描述')}</p>
+      </div>
+      <div class="form-group">
+        <label class="form-label">执行进度</label>
+        <div class="progress-bar">
+          <div class="progress-fill" style="width: ${progress}%"></div>
+        </div>
+        <span class="progress-text">${progress}%</span>
+      </div>
+      ${task.artifacts?.length > 0 ? `
+      <div class="form-group">
+        <label class="form-label">产出文件 (${task.artifacts.length})</label>
+        <div class="artifacts-mini-list">
+          ${task.artifacts.slice(0, 5).map(a => `
+            <div class="artifact-mini-item">
+              <span>${getFileIcon(a.type)}</span>
+              <span>${escapeHtml(a.name)}</span>
+            </div>
+          `).join('')}
+          ${task.artifacts.length > 5 ? `<div class="more-artifacts">+${task.artifacts.length - 5} 更多</div>` : ''}
+        </div>
+      </div>
+      ` : ''}
+    </div>
+  `;
+}
+
+// 渲染日志内容（增强版，支持工具调用格式化）
+function renderLogsContent(logs) {
+  if (!logs || logs.length === 0) {
+    return `<div class="empty-state"><div class="empty-state-text">暂无执行日志</div></div>`;
+  }
+
+  let html = `<div class="timeline">`;
+  for (const log of logs) {
+    // 适配 API 返回字段：description, details, icon
+    const type = log.type || 'info';
+    const icon = log.icon || LOG_ICONS[type] || '•';
+    const levelClass = log.level === 'error' ? 'error' : log.level === 'warning' ? 'warning' : '';
+    const isToolCall = type === 'tool_call';
+    const isToolResult = type === 'tool_result';
+    const metadata = log.metadata || log.details;
+    const hasMetadata = metadata && (isToolCall || isToolResult);
+    const content = log.description || log.content || '';
+
+    // 判断是否需要渲染 Markdown
+    const shouldRenderMarkdown = shouldRenderAsMarkdown(content, type);
+
+    // 渲染内容
+    let renderedContent;
+    if (shouldRenderMarkdown) {
+      renderedContent = `<div class="log-markdown markdown-body">${renderMarkdown(content)}</div>`;
     } else {
-        html = `<pre class="preview-text">${escapeHtml(fileData.preview)}</pre>`;
+      renderedContent = escapeHtml(content);
     }
-    
-    container.innerHTML = html;
+
+    html += `
+      <div class="timeline-item ${levelClass}" data-id="${log.id}" data-type="${type}">
+        <div class="timeline-marker">
+          <div class="timeline-icon">${icon}</div>
+          <div class="timeline-line"></div>
+        </div>
+        <div class="timeline-content">
+          <div class="timeline-header">
+            <span class="timeline-time">${formatDate(log.timestamp)}</span>
+            <span class="timeline-badge ${type}">${type}</span>
+            ${log.level && log.level !== 'info' ? `<span class="level-badge ${log.level}">${log.level}</span>` : ''}
+            ${shouldRenderMarkdown ? `<button class="btn-toggle-md" onclick="toggleLogMarkdown(this)" title="切换源码/渲染">📝</button>` : ''}
+          </div>
+          <div class="timeline-body" data-raw="${escapeHtml(content)}" data-rendered="${shouldRenderMarkdown ? 'true' : 'false'}">
+            ${renderedContent}
+          </div>
+          ${hasMetadata ? renderLogMetadataPanel(metadata, type) : ''}
+        </div>
+      </div>
+    `;
+  }
+  html += `</div>`;
+  return html;
 }
 
-function renderSimpleMarkdown(text) {
-    if (!text) return '';
-    
-    return text
-        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
-        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
-        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\*(.+?)\*/g, '<em>$1</em>')
-        .replace(/`(.+?)`/g, '<code>$1</code>')
-        .replace(/^- (.+)$/gm, '<li>$1</li>')
-        .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-        .replace(/\n/g, '<br>');
-}
+// 判断内容是否应该渲染为 Markdown
+function shouldRenderAsMarkdown(content, type) {
+  if (!content || typeof content !== 'string') return false;
 
-async function loadFilePreview(taskId, filePath) {
-    // Legacy function kept for compatibility
-    const preview = document.getElementById('output-preview');
-    if (!preview) return;
-    
-    const filename = filePath.split('/').pop();
-    await selectFile(filePath, filename, '');
-}
+  // thought 和 milestone 类型的日志通常包含 Markdown
+  const mdTypes = ['thought', 'milestone', 'action'];
+  if (!mdTypes.includes(type)) return false;
 
-function refreshTaskOutput() {
-    if (state.currentTaskId) {
-        loadTaskOutput(state.currentTaskId);
-        showToast('已刷新成果列表', 'info');
+  // 检测 Markdown 特征
+  const mdPatterns = [
+    /^#{1,6}\s/m,           // 标题
+    /\*\*.+?\*\*/,          // 粗体
+    /^\s*[-*+]\s/m,         // 无序列表
+    /^\s*\d+\.\s/m,         // 有序列表
+    /^\|.*\|/m,             // 表格
+    /\[.+?\]\(.+?\)/,       // 链接
+    /```[\s\S]*?```/,       // 代码块
+    /^>\s/m,                // 引用
+    /---+/,                 // 分隔线
+  ];
+
+  let matchCount = 0;
+  for (const pattern of mdPatterns) {
+    if (pattern.test(content)) {
+      matchCount++;
     }
+  }
+
+  // 至少匹配2个 Markdown 特征才渲染
+  return matchCount >= 2;
 }
+
+// 切换日志的 Markdown 渲染/源码显示
+function toggleLogMarkdown(btn) {
+  const body = btn.closest('.timeline-content').querySelector('.timeline-body');
+  if (!body) return;
+
+  const isRendered = body.dataset.rendered === 'true';
+  const rawContent = body.dataset.raw;
+
+  if (isRendered) {
+    // 切换到源码
+    body.innerHTML = escapeHtml(unescapeHtml(rawContent));
+    body.dataset.rendered = 'false';
+    btn.textContent = '👁';
+    btn.title = '切换渲染/源码';
+  } else {
+    // 切换到渲染
+    body.innerHTML = `<div class="log-markdown markdown-body">${renderMarkdown(unescapeHtml(rawContent))}</div>`;
+    body.dataset.rendered = 'true';
+    btn.textContent = '📝';
+    btn.title = '切换源码/渲染';
+  }
+}
+window.toggleLogMarkdown = toggleLogMarkdown;
+
+// HTML 反转义
+function unescapeHtml(text) {
+  const textarea = document.createElement('textarea');
+  textarea.innerHTML = text;
+  return textarea.value;
+}
+
+// 渲染日志元数据面板（工具调用详情）
+function renderLogMetadataPanel(metadata, type) {
+  if (type === 'tool_call' && metadata.toolName) {
+    const inputStr = typeof metadata.toolInput === 'object'
+      ? JSON.stringify(metadata.toolInput, null, 2)
+      : String(metadata.toolInput || '');
+
+    return `
+      <div class="tool-call-panel">
+        <div class="tool-call-header">
+          <span class="tool-icon">🔧</span>
+          <span class="tool-name">${escapeHtml(metadata.toolName)}</span>
+          ${metadata.duration ? `<span class="tool-duration">⏱️ ${metadata.duration}ms</span>` : ''}
+        </div>
+        ${metadata.toolInput ? `
+        <div class="tool-section">
+          <div class="tool-section-title">输入参数</div>
+          <pre class="tool-code"><code>${formatCodeContent(inputStr)}</code></pre>
+        </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  if (type === 'tool_result' && metadata.toolOutput !== undefined) {
+    const outputStr = typeof metadata.toolOutput === 'object'
+      ? JSON.stringify(metadata.toolOutput, null, 2)
+      : String(metadata.toolOutput);
+
+    return `
+      <div class="tool-result-panel">
+        <div class="tool-section">
+          <div class="tool-section-title">执行结果</div>
+          <pre class="tool-code ${detectContentType(outputStr)}"><code>${formatCodeContent(outputStr)}</code></pre>
+        </div>
+      </div>
+    `;
+  }
+
+  if (metadata.filePath) {
+    return `
+      <div class="file-ref">
+        <span class="file-icon">📄</span>
+        <span class="file-path">${escapeHtml(metadata.filePath)}</span>
+      </div>
+    `;
+  }
+
+  return '';
+}
+
+// 检测内容类型
+function detectContentType(content) {
+  if (typeof content !== 'string') return '';
+  const trimmed = content.trim();
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) return 'json';
+  if (trimmed.startsWith('<')) return 'xml';
+  if (trimmed.includes('function') || trimmed.includes('const ') || trimmed.includes('import ')) return 'code';
+  return '';
+}
+
+// 格式化代码内容（添加简单语法高亮）
+function formatCodeContent(content) {
+  if (typeof content !== 'string') return escapeHtml(String(content));
+
+  let escaped = escapeHtml(content);
+
+  // JSON 高亮
+  try {
+    const trimmed = content.trim();
+    if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+      const parsed = JSON.parse(trimmed);
+      escaped = escapeHtml(JSON.stringify(parsed, null, 2));
+    }
+  } catch (e) {
+    // 不是有效的 JSON，使用原始内容
+  }
+
+  // 简单的关键字高亮
+  escaped = escaped
+    // 字符串值（双引号内容）
+    .replace(/"([^"]+)":/g, '<span class="hl-key">"$1"</span>:')
+    // 字符串值
+    .replace(/:\s*"([^"]*)"/g, ': <span class="hl-string">"$1"</span>')
+    // 数字
+    .replace(/:\s*(\d+\.?\d*)/g, ': <span class="hl-number">$1</span>')
+    // 布尔值
+    .replace(/:\s*(true|false|null)/g, ': <span class="hl-boolean">$1</span>')
+    // 错误关键字
+    .replace(/\b(Error|error|ERROR|Failed|failed|FAILED)\b/g, '<span class="hl-error">$1</span>')
+    // 路径
+    .replace(/(\/[\w\-\.\/]+)/g, '<span class="hl-path">$1</span>');
+
+  return escaped;
+}
+
+function renderSubtasksContent(subtasks) {
+  if (!subtasks || subtasks.length === 0) {
+    return `<div class="empty-state"><div class="empty-state-text">暂无子任务</div></div>`;
+  }
+
+  let html = `<div class="subtask-list">`;
+  for (const st of subtasks) {
+    const statusIcon = st.status === 'completed' ? '✓' : st.status === 'running' ? '●' : '○';
+    html += `
+      <div class="subtask-item" onclick="viewTask('${st.id}')">
+        <div class="subtask-status ${st.status}">${statusIcon}</div>
+        <div class="subtask-info">
+          <div class="subtask-title">${escapeHtml(st.title)}</div>
+          <div class="subtask-role">${getRoleName(st.role)}</div>
+        </div>
+        <span class="status-badge ${st.status}">${getStatusText(st.status)}</span>
+      </div>
+    `;
+  }
+  html += `</div>`;
+  return html;
+}
+
+// 渲染成品内容
+function renderArtifactsContent(artifacts) {
+  if (!artifacts || artifacts.length === 0) {
+    return `<div class="empty-state"><div class="empty-state-text">暂无成品文件</div></div>`;
+  }
+
+  // 按类型分组
+  const grouped = {};
+  for (const artifact of artifacts) {
+    const type = artifact.type || 'other';
+    if (!grouped[type]) grouped[type] = [];
+    grouped[type].push(artifact);
+  }
+
+  let html = `<div class="artifacts-section">`;
+
+  // 工具栏
+  html += `
+    <div class="artifacts-toolbar">
+      <div class="artifacts-stats">
+        共 ${artifacts.length} 个文件
+      </div>
+      <button class="btn" onclick="downloadAllArtifacts()">
+        📦 打包下载
+      </button>
+    </div>
+  `;
+
+  // 按类型分组显示
+  for (const [type, items] of Object.entries(grouped)) {
+    const config = ARTIFACT_TYPES[type] || ARTIFACT_TYPES.other;
+    html += `
+      <div class="artifact-group">
+        <h4 class="artifact-group-title">
+          <span class="group-icon">${config.icon}</span>
+          ${config.label}
+          <span class="group-count">(${items.length})</span>
+        </h4>
+        <div class="artifacts-list">
+          ${items.map(a => renderArtifactItem(a)).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  html += `</div>`;
+  return html;
+}
+
+// 下载所有成品
+async function downloadAllArtifacts() {
+  const artifacts = state.currentTask?.artifacts;
+  if (!artifacts || artifacts.length === 0) {
+    showNotification('没有可下载的文件', 'warning');
+    return;
+  }
+
+  showNotification('正在准备打包下载...', 'info');
+
+  try {
+    const response = await fetch(`${API_BASE}/api/tasks/${state.currentTask.id}/artifacts/download-all`, {
+      method: 'POST'
+    });
+
+    if (!response.ok) throw new Error('打包下载失败');
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `task-${state.currentTask.id}-artifacts.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+
+    showNotification('下载已开始', 'success');
+  } catch (e) {
+    console.error('Failed to download all artifacts:', e);
+    showNotification('打包下载失败: ' + e.message, 'error');
+  }
+}
+
+// 创建任务模态框状态
+let createModalVisible = false;
+
+// 模态框相关函数
+function showCreateModal() {
+  createModalVisible = true;
+  render();
+}
+
+function hideCreateModal() {
+  createModalVisible = false;
+  render();
+}
+
+function renderCreateModal() {
+  if (!createModalVisible) return '';
+  
+  return `
+    <div class="modal-overlay" onclick="hideCreateModal()">
+      <div class="modal" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 class="modal-title">新建任务</h3>
+          <button class="modal-close" onclick="hideCreateModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label">任务标题</label>
+            <input type="text" class="form-input" id="task-title" placeholder="输入任务标题">
+          </div>
+          <div class="form-group">
+            <label class="form-label">任务描述</label>
+            <textarea class="form-input" id="task-desc" placeholder="详细描述任务内容..."></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" onclick="hideCreateModal()">取消</button>
+          <button class="btn btn-success" onclick="submitCreateTask()">创建</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+async function submitCreateTask() {
+  const titleEl = document.getElementById('task-title');
+  const descEl = document.getElementById('task-desc');
+  
+  const title = titleEl ? titleEl.value.trim() : '';
+  const description = descEl ? descEl.value.trim() : '';
+  
+  if (!title) {
+    alert('请输入任务标题');
+    return;
+  }
+  
+  try {
+    const task = await createTask(title, description);
+    hideCreateModal();
+    viewTask(task.id);
+  } catch (e) {
+    alert('创建任务失败: ' + e.message);
+  }
+}
+
+// 导航函数 - 暴露到全局
+window.setFilter = function(filter) {
+  state.filter = filter;
+  fetchTasks();
+};
+
+window.setTab = function(tab) {
+  state.currentTab = tab;
+  updateUrl();
+  render();
+};
+
+window.viewTask = function(taskId) {
+  // 获取任务详情
+  (async () => {
+    state.loading = true;
+    render();
+
+    try {
+      state.currentTask = await api(`/api/tasks/${taskId}`);
+      state.currentTab = 'overview';
+      updateUrl();
+      connectWebSocket(taskId);
+    } catch (e) {
+      console.error('Failed to fetch task:', e);
+    }
+
+    state.loading = false;
+    render();
+  })();
+};
+
+window.goBack = function() {
+  if (state.ws) {
+    state.ws.close();
+    state.ws = null;
+  }
+  state.currentTask = null;
+  state.currentTab = 'overview';
+  updateUrl();
+  render();
+};
+
+// ========== URL 状态管理 ==========
+
+// 更新 URL
+function updateUrl() {
+  const params = new URLSearchParams();
+
+  if (state.currentTask) {
+    params.set('task', state.currentTask.id);
+    if (state.currentTab && state.currentTab !== 'overview') {
+      params.set('tab', state.currentTab);
+    }
+  }
+
+  if (state.filter && state.filter !== 'all') {
+    params.set('filter', state.filter);
+  }
+
+  const newUrl = params.toString() ? `${location.pathname}?${params.toString()}` : location.pathname;
+  history.replaceState(null, '', newUrl);
+}
+
+// 从 URL 恢复状态
+function restoreFromUrl() {
+  const params = new URLSearchParams(location.search);
+
+  const taskId = params.get('task');
+  const tab = params.get('tab');
+  const filter = params.get('filter');
+
+  // 恢复过滤器
+  if (filter && ['all', 'running', 'completed', 'failed', 'paused'].includes(filter)) {
+    state.filter = filter;
+  }
+
+  // 恢复任务视图
+  if (taskId) {
+    state.currentTab = tab || 'overview';
+    return taskId;
+  }
+
+  return null;
+}
+
+// 监听浏览器前进/后退
+window.addEventListener('popstate', () => {
+  const taskId = restoreFromUrl();
+  if (taskId) {
+    // 不更新 URL，只恢复状态
+    (async () => {
+      try {
+        state.currentTask = await api(`/api/tasks/${taskId}`);
+        connectWebSocket(taskId);
+      } catch (e) {
+        console.error('Failed to restore task:', e);
+        state.currentTask = null;
+      }
+      render();
+    })();
+  } else {
+    if (state.ws) {
+      state.ws.close();
+      state.ws = null;
+    }
+    state.currentTask = null;
+    state.currentTab = 'overview';
+    render();
+  }
+});
+
+window.showCreateModal = showCreateModal;
+window.hideCreateModal = hideCreateModal;
+window.submitCreateTask = submitCreateTask;
+window.startTask = startTask;
+window.pauseTask = pauseTask;
+window.resumeTask = resumeTask;
+window.retryTask = retryTask;
+window.previewArtifact = previewArtifact;
+window.downloadArtifact = downloadArtifact;
+window.downloadAllArtifacts = downloadAllArtifacts;
+window.handleModalAction = handleModalAction;
+
+// 主渲染函数
+function render() {
+  const modal = renderCreateModal();
+
+  // 两栏布局：左侧任务列表 + 右侧任务详情
+  const html = `
+    <div class="app-layout">
+      <!-- 左侧：任务列表 -->
+      <aside class="sidebar">
+        ${renderSidebar()}
+      </aside>
+
+      <!-- 右侧：任务详情 -->
+      <main class="main-content">
+        ${state.currentTask ? renderTaskDetailPanel() : renderEmptyDetail()}
+      </main>
+    </div>
+    ${modal}
+  `;
+
+  document.getElementById('app').innerHTML = html;
+
+  // 如果是详情页，异步加载标签页内容
+  if (state.currentTask && state.currentTab !== 'overview') {
+    renderTabContentSync();
+  }
+}
+
+// 渲染侧边栏
+function renderSidebar() {
+  const filteredTasks = state.filter === 'all'
+    ? state.tasks
+    : state.tasks.filter(t => t.status === state.filter);
+
+  return `
+    <div class="sidebar-header">
+      <h1 class="sidebar-title">🤖 Agent Team</h1>
+      <button class="btn-create" onclick="showCreateModal()" title="新建任务">+</button>
+    </div>
+
+    <div class="filter-tabs">
+      <button class="filter-tab ${state.filter === 'all' ? 'active' : ''}" onclick="setFilter('all')">全部</button>
+      <button class="filter-tab ${state.filter === 'running' ? 'active' : ''}" onclick="setFilter('running')">执行中</button>
+      <button class="filter-tab ${state.filter === 'completed' ? 'active' : ''}" onclick="setFilter('completed')">已完成</button>
+      <button class="filter-tab ${state.filter === 'failed' ? 'active' : ''}" onclick="setFilter('failed')">失败</button>
+    </div>
+
+    <div class="task-list-container">
+      ${state.loading ? `
+        <div class="loading"><div class="spinner"></div></div>
+      ` : filteredTasks.length === 0 ? `
+        <div class="empty-sidebar">
+          <div class="empty-icon">📋</div>
+          <div class="empty-text">暂无任务</div>
+        </div>
+      ` : filteredTasks.map(task => `
+        <div class="task-item ${state.currentTask?.id === task.id ? 'active' : ''} status-${task.status}"
+             onclick="viewTask('${task.id}')">
+          <div class="task-item-header">
+            <span class="task-item-title">${escapeHtml(task.title)}</span>
+            <span class="status-dot ${task.status}"></span>
+          </div>
+          <div class="task-item-meta">
+            <span class="role-tag">${getRoleName(task.role)}</span>
+            <span class="time-tag">${timeAgo(task.createdAt)}</span>
+          </div>
+          ${task.progress !== undefined && task.progress > 0 ? `
+          <div class="task-item-progress">
+            <div class="progress-mini-bar">
+              <div class="progress-mini-fill" style="width: ${task.progress}%"></div>
+            </div>
+            <span class="progress-mini-text">${task.progress}%</span>
+          </div>
+          ` : ''}
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+// 渲染空详情
+function renderEmptyDetail() {
+  return `
+    <div class="empty-detail">
+      <div class="empty-detail-icon">👈</div>
+      <div class="empty-detail-title">选择一个任务</div>
+      <div class="empty-detail-text">从左侧列表中选择一个任务查看详情</div>
+      <button class="btn btn-primary btn-lg" onclick="showCreateModal()">
+        + 创建新任务
+      </button>
+    </div>
+  `;
+}
+
+// 渲染任务详情面板
+function renderTaskDetailPanel() {
+  const task = state.currentTask;
+  if (!task) return renderEmptyDetail();
+
+  return `
+    <div class="detail-panel">
+      <div class="detail-header">
+        <div class="detail-title-row">
+          <h2 class="detail-title">${escapeHtml(task.title)}</h2>
+          <span class="status-badge large ${task.status}">${getStatusText(task.status)}</span>
+        </div>
+        <div class="detail-meta-row">
+          <span class="meta-item">
+            <span class="meta-icon">👤</span>
+            <span>${getRoleName(task.role)}</span>
+          </span>
+          <span class="meta-item">
+            <span class="meta-icon">📅</span>
+            <span>创建: ${formatDate(task.createdAt)}</span>
+          </span>
+          ${task.completedAt ? `
+          <span class="meta-item">
+            <span class="meta-icon">✅</span>
+            <span>完成: ${formatDate(task.completedAt)}</span>
+          </span>
+          ` : ''}
+        </div>
+        <div class="detail-actions">
+          ${task.status === 'pending' ? `<button class="btn btn-success" onclick="startTask('${task.id}')">▶ 开始执行</button>` : ''}
+          ${task.status === 'running' ? `<button class="btn btn-warning" onclick="pauseTask('${task.id}')">⏸ 暂停</button>` : ''}
+          ${task.status === 'paused' ? `<button class="btn btn-success" onclick="resumeTask('${task.id}')">▶ 继续</button>` : ''}
+          ${task.status === 'failed' ? `<button class="btn btn-danger" onclick="retryTask('${task.id}')">↻ 重试</button>` : ''}
+        </div>
+      </div>
+
+      <div class="tabs">
+        <div class="tab ${state.currentTab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">📋 概览</div>
+        <div class="tab ${state.currentTab === 'logs' ? 'active' : ''}" onclick="setTab('logs')">📝 执行日志</div>
+        <div class="tab ${state.currentTab === 'subtasks' ? 'active' : ''}" onclick="setTab('subtasks')">🔀 子任务</div>
+        <div class="tab ${state.currentTab === 'artifacts' ? 'active' : ''}" onclick="setTab('artifacts')">📦 成品</div>
+      </div>
+
+      <div class="tab-content" id="tab-content">
+        ${renderTabContentSync()}
+      </div>
+    </div>
+  `;
+}
+
+// 初始化
+async function init() {
+  // 先获取任务列表
+  await fetchTasks();
+
+  // 从 URL 恢复状态
+  const taskId = restoreFromUrl();
+  if (taskId) {
+    // 静默加载任务详情（不更新 URL）
+    try {
+      state.currentTask = await api(`/api/tasks/${taskId}`);
+      connectWebSocket(taskId);
+    } catch (e) {
+      console.error('Failed to restore task from URL:', e);
+      state.currentTask = null;
+    }
+    render();
+  }
+}
+
+// 启动应用
+init();

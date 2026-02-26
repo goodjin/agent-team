@@ -1,0 +1,195 @@
+/* 基础样式重置 */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Arial', sans-serif;
+    background-color: #f5f5f5;
+    color: #333;
+    line-height: 1.6;
+    padding: 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    background-color: white;
+    border-radius: 10px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+    padding: 30px;
+}
+
+h1 {
+    text-align: center;
+    color: #2c3e50;
+    margin-bottom: 30px;
+    font-size: 2.5rem;
+}
+
+/* 控制面板样式 */
+.control-panel {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 30px;
+    padding: 15px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+    flex-wrap: wrap;
+    gap: 20px;
+}
+
+.mode-selector, .letter-info {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.mode-selector span {
+    font-weight: bold;
+    color: #555;
+}
+
+/* 按钮样式 */
+button {
+    padding: 8px 16px;
+    background-color: #3498db;
+    color: white;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    transition: background-color 0.3s;
+}
+
+button:hover {
+    background-color: #2980b9;
+}
+
+button.active {
+    background-color: #e74c3c;
+}
+
+button.active:hover {
+    background-color: #c0392b;
+}
+
+/* 字母容器样式 */
+.letter-container {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(60px, 1fr));
+    gap: 15px;
+    margin: 30px 0;
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+}
+
+.letter-item {
+    aspect-ratio: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: white;
+    border-radius: 8px;
+    font-size: 1.8rem;
+    font-weight: bold;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+    position: relative;
+    overflow: hidden;
+}
+
+.letter-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+    background-color: #f0f8ff;
+}
+
+.letter-item.selected {
+    background-color: #3498db;
+    color: white;
+    transform: scale(1.05);
+}
+
+.letter-item.revealed {
+    animation: reveal 0.5s ease-out;
+}
+@keyframes reveal {
+    0% {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.letter-item.hidden {
+    visibility: hidden;
+}
+
+/* 信息面板样式 */
+.letter-info {
+    font-size: 1rem;
+}
+
+.letter-info span {
+    font-weight: bold;
+    color: #2c3e50;
+}
+
+/* 重置按钮样式 */
+.reset-btn {
+    text-align: center;
+    margin-top: 20px;
+}
+
+.reset-btn button {
+    background-color: #e74c3c;
+    padding: 10px 20px;
+    font-size: 16px;
+}
+
+.reset-btn button:hover {
+    background-color: #c0392b;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+    .container {
+        padding: 20px;
+    }
+    
+    h1 {
+        font-size: 2rem;
+    }
+    
+    .control-panel {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .letter-container {
+        grid-template-columns: repeat(auto-fill, minmax(50px, 1fr));
+    }
+    
+    .letter-item {
+        font-size: 1.5rem;
+    }
+}
+
+@media (max-width: 480px) {
+    .letter-container {
+        grid-template-columns: repeat(auto-fill, minmax(45px, 1fr));
+    }
+    
+    .letter-item {
+        font-size: 1.2rem;
+    }
+}

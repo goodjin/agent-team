@@ -1,0 +1,15 @@
+{
+  "id": "3b9ca34be16844ae",
+  "taskId": "c7e6c216c23a47c6",
+  "roleId": "task-analyzer",
+  "status": "failed",
+  "context": {
+    "systemPrompt": "你是一个专业的任务分析师，擅长分析需求并拆解复杂任务。",
+    "history": [],
+    "variables": {}
+  },
+  "createdAt": "2026-02-23T05:04:30.314Z",
+  "startedAt": "2026-02-23T05:04:30.315Z",
+  "error": "Error: Provider not found: ",
+  "completedAt": "2026-02-23T05:04:30.318Z"
+}

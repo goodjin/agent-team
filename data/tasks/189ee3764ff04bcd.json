@@ -1,0 +1,14 @@
+{
+  "id": "189ee3764ff04bcd",
+  "title": "API测试任务",
+  "description": "测试描述",
+  "status": "completed",
+  "role": "task-analyzer",
+  "dependencies": [],
+  "createdAt": "2026-02-21T13:32:25.036Z",
+  "artifactIds": [],
+  "logIds": [],
+  "subtaskIds": [],
+  "startedAt": "2026-02-21T13:32:25.276Z",
+  "completedAt": "2026-02-21T13:32:25.281Z"
+}

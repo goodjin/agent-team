@@ -1,0 +1,14 @@
+{
+  "id": "f1484127002c4785",
+  "title": "示例任务",
+  "description": "实现用户登录功能，包括前端表单和后端API",
+  "status": "completed",
+  "role": "task-analyzer",
+  "dependencies": [],
+  "createdAt": "2026-02-21T03:44:29.241Z",
+  "artifactIds": [],
+  "logIds": [],
+  "subtaskIds": [],
+  "startedAt": "2026-02-21T03:44:45.323Z",
+  "completedAt": "2026-02-21T03:44:45.329Z"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "7829aa233b8d4fc5",
+  "title": "重试测试任务",
+  "status": "running",
+  "role": "task-analyzer",
+  "dependencies": [],
+  "createdAt": "2026-02-21T13:33:00.044Z",
+  "artifactIds": [],
+  "logIds": [],
+  "subtaskIds": [],
+  "startedAt": "2026-02-21T13:33:00.272Z"
+}

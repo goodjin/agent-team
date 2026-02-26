@@ -1,122 +1,37 @@
-/**
- * Project Agent - 多角色 AI 项目管理系统
- *
- * 一个基于角色的多智能体项目管理系统，通过定义不同的专家角色
- * 来完成项目分析、需求设计、架构设计、开发执行、测试和文档等任务。
- */
+import { createContainer } from './container.js';
 
-// 核心导出
-export { ProjectAgent } from './core/index.js';
-export { TaskManager } from './core/index.js';
-export { OnboardingManager, createOnboardingManager } from './core/onboarding.js';
+async function main() {
+  console.log('Starting Agent Team...');
 
-// 类型导出
-export type {
-  // 基础类型
-  LLMProvider,
-  LLMConfig,
-  RoleType,
-  TaskType,
-  TaskStatus,
-  Priority,
-  ToolResult,
+  const container = createContainer('./data');
 
-  // 角色和任务
-  RoleDefinition,
-  Task,
-  TaskConstraints,
+  // 确保数据目录存在
+  await container.fileStore.ensureDir('tasks');
+  await container.fileStore.ensureDir('logs');
+  await container.fileStore.ensureDir('artifacts');
+  await container.fileStore.ensureDir('agents');
 
-  // 项目配置
-  ProjectConfig,
-  ToolConfig,
-  ProjectConstraints,
+  console.log('Data directories initialized');
 
-  // 工具
-  ToolDefinition,
+  // 启动 API Gateway
+  container.apiGateway.start();
 
-  // 工作流
-  Workflow,
-  WorkflowStep,
-  WorkflowTrigger,
-  RetryPolicy,
+  console.log('Agent Team is ready!');
+}
 
-  // 执行
-  ExecutionContext,
-  AgentEvent,
-  AgentEventData,
-  EventListener,
+main().catch(console.error);
 
-  // 消息和响应
-  Message,
-  LLMResponse,
-
-  // 分析和设计结果
-  ProjectAnalysis,
-  RequirementAnalysis,
-  ArchitectureDesign,
-} from './types/index.js';
-
-// 角色导出
-export {
-  BaseRole,
-  RoleFactory,
-  ProductManager,
-  Architect,
-  Developer,
-  Tester,
-  DocWriter,
-} from './roles/index.js';
-
-// 如果角色类不存在，提供占位符
-// export { ProductManager } from './roles/product-manager.js';
-// export { Architect } from './roles/architect.js';
-// export { Developer } from './roles/developer.js';
-// export { Tester } from './roles/tester.js';
-// export { DocWriter } from './roles/doc-writer.js';
-
-// 工具导出
-export {
-  BaseTool,
-  ToolRegistry,
-  ReadFileTool,
-  WriteFileTool,
-  SearchFilesTool,
-  DeleteFileTool,
-  ListDirectoryTool,
-  GitStatusTool,
-  GitCommitTool,
-  GitBranchTool,
-  GitPullTool,
-  GitPushTool,
-} from './tools/index.js';
-
-// 服务导出
-export {
-  LLMService,
-  AnthropicService,
-  OpenAIService,
-  LLMServiceFactory,
-} from './services/index.js';
-
-// CLI 导出
-export {
-  InteractiveCLI,
-  ProgressDisplay,
-  InteractiveExecutor,
-  HybridModeManager,
-  createHybridModeManager,
-  ExecutionMode,
-} from './cli/index.js';
-export type { HybridModeOptions } from './cli/index.js';
-
-// AI Agent 导出
-export {
-  IntelligentAgent,
-  createIntelligentAgent,
-  AIAgentSession,
-  startAIAgentSession,
-} from './ai/index.js';
-export type { AIAgentConfig, ChatMessage, ToolCall, AIAgentSessionConfig } from './ai/index.js';
-
-// 默认导出
-export { ProjectAgent as default } from './core/index.js';
+export { createContainer } from './container.js';
+export { TaskService } from './application/task/task.service.js';
+export { LogService } from './application/log/log.service.js';
+export { ArtifactService } from './application/artifact/artifact.service.js';
+export { AgentService } from './application/agent/agent.service.js';
+export { APIGateway } from './application/api/gateway.js';
+export * from './domain/task/index.js';
+export * from './domain/agent/index.js';
+export * from './domain/tool/index.js';
+export * from './infrastructure/file-store/index.js';
+export * from './infrastructure/event-bus/index.js';
+export * from './infrastructure/logger/index.js';
+export * from './infrastructure/scheduler/index.js';
+export * from './infrastructure/websocket/index.js';

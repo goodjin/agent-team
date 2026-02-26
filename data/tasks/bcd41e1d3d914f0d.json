@@ -1,0 +1,14 @@
+{
+  "id": "bcd41e1d3d914f0d",
+  "title": "暂停恢复测试",
+  "description": "测试pause和resume",
+  "status": "completed",
+  "role": "task-analyzer",
+  "dependencies": [],
+  "createdAt": "2026-02-21T13:32:58.830Z",
+  "artifactIds": [],
+  "logIds": [],
+  "subtaskIds": [],
+  "startedAt": "2026-02-21T13:32:58.911Z",
+  "completedAt": "2026-02-21T13:32:58.915Z"
+}

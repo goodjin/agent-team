@@ -1,0 +1,14 @@
+{
+  "id": "23e3ffd3e10b4fbe",
+  "taskId": "7f7ec08450c14eb5",
+  "roleId": "task-analyzer",
+  "status": "completed",
+  "context": {
+    "systemPrompt": "你是一个专业的任务分析师，擅长分析需求并拆解复杂任务。",
+    "history": [],
+    "variables": {}
+  },
+  "createdAt": "2026-02-24T01:42:51.581Z",
+  "startedAt": "2026-02-24T01:42:51.585Z",
+  "completedAt": "2026-02-24T01:44:03.381Z"
+}

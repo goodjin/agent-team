@@ -1,0 +1,14 @@
+{
+  "id": "12bd308b931f4c14",
+  "title": "Playwright 测试任务",
+  "description": "这是一个自动化测试创建的任务",
+  "status": "completed",
+  "role": "task-analyzer",
+  "dependencies": [],
+  "createdAt": "2026-02-21T15:05:35.079Z",
+  "artifactIds": [],
+  "logIds": [],
+  "subtaskIds": [],
+  "startedAt": "2026-02-24T02:57:23.982Z",
+  "completedAt": "2026-02-24T03:02:31.394Z"
+}
