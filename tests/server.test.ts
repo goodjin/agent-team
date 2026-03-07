@@ -137,7 +137,10 @@ describe('Server Routes', () => {
 
   describe('Agent Router', () => {
     it('should list agents', async () => {
-      const router = createAgentRouter();
+      const mockAgentMgr = {
+        getAgents: vi.fn().mockReturnValue([]),
+      };
+      const router = createAgentRouter(mockAgentMgr);
       const app = express();
       app.use(express.json());
       app.use('/api/agents', router);

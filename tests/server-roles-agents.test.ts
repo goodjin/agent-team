@@ -116,11 +116,27 @@ describe('Role and Agent Routes', () => {
 
   describe('Agent Routes', () => {
     let app: express.Application;
+    let mockAgentMgr: any;
 
     beforeEach(() => {
+      mockAgentMgr = {
+        getAgents: vi.fn().mockReturnValue([]),
+        getAgent: vi.fn().mockReturnValue(null),
+        createAgent: vi.fn().mockResolvedValue({
+          id: 'test-agent-id',
+          roleId: 'developer',
+          projectId: 'test-project',
+          name: 'My Agent',
+          status: 'idle',
+        }),
+        restartAgent: vi.fn().mockResolvedValue(undefined),
+        deleteAgent: vi.fn().mockResolvedValue(undefined),
+        setAgentStatus: vi.fn().mockResolvedValue(undefined),
+        checkAgentStatus: vi.fn().mockResolvedValue({ status: 'idle' }),
+      };
       app = express();
       app.use(express.json());
-      app.use('/api/agents', createAgentRouter());
+      app.use('/api/agents', createAgentRouter(mockAgentMgr));
     });
 
     describe('GET /api/agents', () => {
@@ -181,7 +197,7 @@ describe('Role and Agent Routes', () => {
         const response = await request(app)
           .post('/api/agents/')
           .send({ name: 'Incomplete Agent' })
-          .expect(500);
+          .expect(400);
 
         expect(response.body.success).toBe(false);
       });
