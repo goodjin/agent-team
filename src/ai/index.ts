@@ -51,3 +51,6 @@ export type { ReviewIssue, CodeReviewResult, ReviewConfig } from './code-review.
 
 export { ArchitectureComplianceChecker, createArchitectureComplianceChecker } from './architecture-compliance.js';
 export type { ComplianceIssue, ComplianceResult, ComplianceConfig, ArchitectureRule } from './architecture-compliance.js';
+
+export { IntegrationTestOrchestrator, createTestOrchestrator } from './test-orchestration.js';
+export type { TestModule, TestResult, TestCoverage, TestSummary, TestOrchestratorConfig } from './test-orchestration.js';
