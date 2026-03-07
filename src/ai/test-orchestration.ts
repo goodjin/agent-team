@@ -4,7 +4,8 @@
 
 import { spawn } from 'child_process';
 import * as path from 'path';
-import * as fs from 'fs/promises';
+import * as fs from 'fs';
+import * as fsPromises from 'fs/promises';
 
 export interface TestModule {
   name: string;
@@ -135,7 +136,7 @@ export class IntegrationTestOrchestrator {
     const deps = new Set<string>();
 
     for (const file of testFiles) {
-      const content = fs.readFileSync ? require('fs').readFileSync(file, 'utf-8') : '';
+      const content = fs.readFileSync(file, 'utf-8');
       // Simple import analysis
       const importMatches = content.match(/from\s+['"]@([^'"]+)['"]/g) || [];
       for (const imp of importMatches) {
@@ -161,7 +162,7 @@ export class IntegrationTestOrchestrator {
 
   private async walkDir(dir: string, pattern: string, files: string[]): Promise<void> {
     try {
-      const entries = await fs.readdir(dir, { withFileTypes: true });
+      const entries = await fsPromises.readdir(dir, { withFileTypes: true });
 
       for (const entry of entries) {
         const fullPath = path.join(dir, entry.name);
@@ -244,7 +245,7 @@ export class IntegrationTestOrchestrator {
 
   private async hasTestFramework(name: string): Promise<boolean> {
     try {
-      await fs.access(path.join(process.cwd(), 'node_modules', name));
+      await fsPromises.access(path.join(process.cwd(), 'node_modules', name));
       return true;
     } catch {
       return false;
@@ -432,7 +433,7 @@ export class IntegrationTestOrchestrator {
 
     for (const file of coverageFiles) {
       try {
-        const content = await fs.readFile(file, 'utf-8');
+        const content = await fsPromises.readFile(file, 'utf-8');
         const data = JSON.parse(content);
 
         for (const [pathKey, metrics] of Object.entries(data)) {

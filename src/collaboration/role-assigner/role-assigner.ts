@@ -1,7 +1,7 @@
 // 角色分配器
 // Phase 2: 协作能力增强
 
-import { Task, Role, TaskAssignment, TaskPriority, CapabilityRegistry } from './types';
+import { Task, Role, TaskAssignment, TaskPriority } from '../types';
 import { capabilityRegistry } from '../capability-registry/capability-registry';
 
 export class RoleAssigner {
@@ -30,7 +30,7 @@ export class RoleAssigner {
     
     for (const role of this.roles.values()) {
       // 检查角色是否具备任务所需能力
-      const hasCapabilities = task.requiredCapabilities.every(required => 
+      const hasCapabilities = task.requiredCapabilities.every((required: string) =>
         role.capabilities.includes(required)
       );
       

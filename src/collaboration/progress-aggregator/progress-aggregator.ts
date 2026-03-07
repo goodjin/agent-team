@@ -1,7 +1,7 @@
 // 进度聚合器
 // Phase 2: 协作能力增强
 
-import { TaskProgress, AggregatedProgress, TaskStatus } from './types';
+import { TaskProgress, AggregatedProgress, TaskStatus } from '../types';
 
 type ProgressCallback = (progress: AggregatedProgress) => void;
 

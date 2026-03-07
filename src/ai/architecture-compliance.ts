@@ -20,6 +20,7 @@ export interface ComplianceResult {
   issues: ComplianceIssue[];
   summary: string;
   score: number;
+  file?: string;
 }
 
 export interface ArchitectureRule {
@@ -253,7 +254,7 @@ const IMPORT_RULES: ArchitectureRule[] = [
 
       if (barrelImports && barrelImports.length > 0) {
         issues.push({
-          severity: 'info',
+          severity: 'low',
           category: 'import',
           message: 'Barrel imports detected - consider direct imports for better tree-shaking',
           file: ctx.filePath,

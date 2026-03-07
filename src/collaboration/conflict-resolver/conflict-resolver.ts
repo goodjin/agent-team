@@ -1,14 +1,14 @@
 // 冲突解决器
 // Phase 2: 协作能力增强
 
-import { 
-  Conflict, 
-  ConflictType, 
-  ConflictStrategy, 
-  Resolution, 
+import {
+  Conflict,
+  ConflictType,
+  ConflictStrategy,
+  Resolution,
   ConflictHandler,
-  Task 
-} from './types';
+  Task
+} from '../types';
 
 export class ConflictResolver {
   private handlers: Map<ConflictType, ConflictHandler> = new Map();
@@ -25,13 +25,13 @@ export class ConflictResolver {
    */
   private registerDefaultHandlers(): void {
     // 资源冲突 - 按优先级解决
-    this.registerHandler('resource', (conflict) => this.resolveByPriority(conflict));
-    
+    this.registerHandler('resource', (conflict: Conflict) => this.resolveByPriority(conflict));
+
     // 依赖冲突 - 按先后来解决
-    this.registerHandler('dependency', (conflict) => this.resolveByFirstCome(conflict));
-    
+    this.registerHandler('dependency', (conflict: Conflict) => this.resolveByFirstCome(conflict));
+
     // 状态冲突 - 简单的失败处理
-    this.registerHandler('state', (conflict) => this.resolveByPriority(conflict));
+    this.registerHandler('state', (conflict: Conflict) => this.resolveByPriority(conflict));
   }
 
   /**
@@ -88,7 +88,7 @@ export class ConflictResolver {
    */
   private hasStateConflict(task1: Task, task2: Task): boolean {
     // 简化实现：检查是否有重叠的能力需求
-    const common = task1.requiredCapabilities.filter(c => 
+    const common = task1.requiredCapabilities.filter((c: string) =>
       task2.requiredCapabilities.includes(c)
     );
     return common.length > 0 && task1.assignedAgent !== task2.assignedAgent;
@@ -142,7 +142,7 @@ export class ConflictResolver {
     // 简化实现：随机选择一个winner
     const winnerIndex = Math.floor(Math.random() * conflict.involvedTasks.length);
     const winner = conflict.involvedTasks[winnerIndex];
-    const losers = conflict.involvedTasks.filter((_, i) => i !== winnerIndex);
+    const losers = conflict.involvedTasks.filter((_: string, i: number) => i !== winnerIndex);
     
     return {
       conflictId: conflict.id,

@@ -1,7 +1,7 @@
 // Agent 能力注册表
 // Phase 2: 协作能力增强
 
-import { Capability, AgentCapability } from './types';
+import { Capability, AgentCapability } from '../types';
 
 export class CapabilityRegistry {
   private agents: Map<string, AgentCapability> = new Map();
@@ -35,10 +35,10 @@ export class CapabilityRegistry {
     
     for (const agent of this.agents.values()) {
       // Find any matching non-deprecated capability
-      const match = agent.capabilities.find(cap => 
+      const match = agent.capabilities.find((cap: Capability) => 
         (cap.name.toLowerCase().includes(queryLower) ||
         cap.description.toLowerCase().includes(queryLower) ||
-        cap.tags.some(tag => tag.toLowerCase().includes(queryLower))) &&
+        cap.tags.some((tag: string) => tag.toLowerCase().includes(queryLower))) &&
         !cap.deprecated
       );
       
@@ -96,7 +96,7 @@ export class CapabilityRegistry {
   getActiveCapabilities(): AgentCapability[] {
     return this.getAll().map(agent => ({
       ...agent,
-      capabilities: agent.capabilities.filter(cap => !cap.deprecated)
+      capabilities: agent.capabilities.filter((cap: Capability) => !cap.deprecated)
     })).filter(agent => agent.capabilities.length > 0);
   }
 
@@ -106,7 +106,7 @@ export class CapabilityRegistry {
   getStats(): { totalAgents: number; totalCapabilities: number } {
     let totalCapabilities = 0;
     for (const agent of this.agents.values()) {
-      totalCapabilities += agent.capabilities.filter(c => !c.deprecated).length;
+      totalCapabilities += agent.capabilities.filter((c: Capability) => !c.deprecated).length;
     }
     return {
       totalAgents: this.agents.size,
