@@ -1,20 +1,25 @@
-# Project Agent
+# AgentOS (原 agent-team)
 
-> 一个基于角色的多智能体项目管理系统，支持自然语言交互，通过定义不同的专家角色来完成项目分析、需求设计、架构设计、开发执行、测试和文档等任务。
+> 基于角色的多智能体项目管理系统 | Role-based Multi-Agent Project Management System
 
-## 特性
+## 🚀 AgentOS 升级版特性
 
-- 多角色系统 - 产品经理、架构师、开发者、测试工程师、文档编写者等专家角色
-- 任务调度 - 自动分解复杂任务、管理依赖关系、并行/串行执行
-- 工具链集成 - 文件操作、Git 管理、代码分析等丰富工具
-- 规范约束 - 通过约束系统确保所有任务按照项目规范执行
-- 进度追踪 - 实时监控任务执行状态，完整的事件系统
-- 自动化文档 - 自动生成和更新项目文档、API 文档
-- 工作流引擎 - 定义复杂的开发工作流，自动执行完整流程
-- 自由输入 - 支持自然语言描述任务，智能理解并执行
-- 交互式会话 - 像聊天一样与 AI 协作开发
-- 混合模式 - 交互式/自动模式自由切换
-- 智能 AI Agent - 像 Claude Code 一样的真正 AI Agent
+- **任务分解引擎** - 复杂任务自动拆分为可执行的子任务列表
+- **智能角色分配** - 根据任务类型自动分配合适的 Agent 角色
+- **Agent 通信总线** - 多 Agent 异步通信与事件分发
+- **共享上下文管理** - 跨 Agent 上下文共享与同步
+- **任务依赖图** - 可视化任务依赖关系与执行计划
+- **工作流引擎** - 定义复杂开发流程并自动执行
+- **多角色系统** - 产品经理、架构师、开发者、测试工程师、文档编写者等专家角色
+- **任务调度** - 自动分解复杂任务、管理依赖关系、并行/串行执行
+- **工具链集成** - 文件操作、Git 管理、代码分析等丰富工具
+- **规范约束** - 通过约束系统确保所有任务按照项目规范执行
+- **进度追踪** - 实时监控任务执行状态，完整的事件系统
+- **自动化文档** - 自动生成和更新项目文档、API 文档
+- **自由输入** - 支持自然语言描述任务，智能理解并执行
+- **交互式会话** - 像聊天一样与 AI 协作开发
+- **混合模式** - 交互式/自动模式自由切换
+- **智能 AI Agent** - 像 Claude Code 一样的真正 AI Agent
 
 ## 安装
 
@@ -147,6 +152,44 @@ agent.registerWorkflow({
 await agent.executeWorkflow('feature-development');
 ```
 
+### 使用任务分解引擎
+
+```typescript
+import { TaskOrchestrator } from 'agent-team';
+
+const orchestrator = new TaskOrchestrator(projectAgent);
+
+// 智能处理复杂需求 - 自动拆分+角色分配
+const result = await orchestrator.processUserInput(
+  "实现一个电商系统，包括用户、商品、订单、支付模块"
+);
+
+// 自动创建子任务并分配给合适的 Agent
+console.log(`任务: ${result.task.title}`);
+console.log(`分配角色: ${result.task.assignedRole}`);
+console.log(`优先级: ${result.task.priority}`);
+```
+
+### 使用 Agent 通信总线
+
+```typescript
+import { AgentBus } from 'agent-team';
+
+// 创建 Agent 通信总线
+const agentBus = new AgentBus();
+
+// 订阅任务事件
+agentBus.subscribe('task:completed', (message) => {
+  console.log('任务完成:', message.payload.taskId);
+});
+
+// 发布事件
+await agentBus.publish('task:created', {
+  id: 'task-001',
+  title: '开发用户模块',
+});
+```
+
 ## 命令行工具
 
 ### 配置管理
@@ -265,8 +308,15 @@ rules:
     - best-practices
 ```
 
-## 文档
+## 文档 | Documentation
 
+### 新版文档 (AgentOS)
+- [架构文档 - Agent 通信总线](docs/architecture/agent-bus.md)
+- [使用指南 - 任务分解引擎](docs/guides/task-decomposition.md)
+- [API 文档 - TaskOrchestrator](docs/api/task-orchestrator.md)
+- [升级计划](docs/UPGRADE_PLAN.md)
+
+### 基础文档
 - [快速入门](docs/QUICK_START.md)
 - [配置指南](docs/CONFIG_GUIDE.md)
 - [角色管理指南](docs/ROLES_GUIDE.md)
