@@ -46,22 +46,34 @@ export class IntelligentEnhancementEngine {
    * 分析任务并提供推荐
    */
   analyzeTask(task: Task | string): TaskRecommendation {
-    const taskObj = typeof task === 'string'
-      ? { description: task, type: 'custom' as TaskType, assignedRole: 'developer' as RoleType }
-      : task;
+    // 1. 模式识别 - 支持 string 和 Task
+    const patternResult = this.recognizer.recognize(task);
 
-    // 1. 模式识别
-    const patternResult = this.recognizer.recognize(taskObj);
-
-    // 2. 性能预测
-    const prediction = this.predictor.predict(taskObj);
+    // 2. 性能预测 - 需要完整 Task 对象
+    let prediction;
+    if (typeof task === 'string') {
+      const fakeTask: Task = {
+        id: 'temp',
+        title: task.substring(0, 50),
+        description: task,
+        type: 'custom',
+        status: 'pending',
+        priority: 'medium',
+        assignedRole: 'developer',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+      prediction = this.predictor.predict(fakeTask);
+    } else {
+      prediction = this.predictor.predict(task);
+    }
 
     // 3. 角色推荐（结合模式识别和自进化）
     let recommendedRole = patternResult.pattern?.suggestedRole || 'developer';
     if (this.evolution.canLearn()) {
       const evolvedRole = this.evolution.getRecommendedRole(
-        typeof task === 'string' ? task : taskObj.description,
-        taskObj.type
+        typeof task === 'string' ? task : task.description,
+        typeof task === 'string' ? 'custom' : task.type
       );
       // 综合两种推荐
       if (evolvedRole !== recommendedRole) {
@@ -70,7 +82,8 @@ export class IntelligentEnhancementEngine {
     }
 
     // 4. 优先级
-    const priority = patternResult.pattern?.suggestedPriority || taskObj.priority || 'medium';
+    const priority = patternResult.pattern?.suggestedPriority ||
+      (typeof task === 'string' ? 'medium' : task.priority) || 'medium';
 
     return {
       role: recommendedRole,
