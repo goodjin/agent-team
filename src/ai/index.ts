@@ -54,3 +54,6 @@ export type { ComplianceIssue, ComplianceResult, ComplianceConfig, ArchitectureR
 
 export { IntegrationTestOrchestrator, createTestOrchestrator } from './test-orchestration.js';
 export type { TestModule, TestResult, TestCoverage, TestSummary, TestOrchestratorConfig } from './test-orchestration.js';
+
+export { DeploymentPipeline, deploy, getDeploymentStatus, saveDeploymentStatus, createDeploymentPipeline } from './deployment-pipeline.js';
+export type { PipelineConfig, StageResult, PipelineResult, DeploymentStatus, Environment, DeployTarget, PipelineStage, StageStatus } from './deployment-pipeline.js';
