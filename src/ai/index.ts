@@ -48,3 +48,6 @@ export type {
 // Phase 4: Engineering Capabilities
 export { CodeReviewAgent, createCodeReviewAgent } from './code-review.js';
 export type { ReviewIssue, CodeReviewResult, ReviewConfig } from './code-review.js';
+
+export { ArchitectureComplianceChecker, createArchitectureComplianceChecker } from './architecture-compliance.js';
+export type { ComplianceIssue, ComplianceResult, ComplianceConfig, ArchitectureRule } from './architecture-compliance.js';
