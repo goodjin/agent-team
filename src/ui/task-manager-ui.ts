@@ -16,6 +16,9 @@ export interface TaskConfig {
   dependencies?: string[];
   payload?: any;
   metadata?: Record<string, any>;
+  // 层级关系
+  projectId?: string;
+  moduleId?: string;
 }
 
 /**

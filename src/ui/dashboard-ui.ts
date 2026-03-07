@@ -37,6 +37,9 @@ export interface TaskStatus {
   startedAt?: Date;
   completedAt?: Date;
   dependencies: string[];
+  // 层级关系
+  projectId?: string;
+  moduleId?: string;
 }
 
 /**

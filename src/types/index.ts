@@ -106,6 +106,9 @@ export interface Task {
   description: string;
   status: TaskStatus;
   priority: Priority;
+  // 层级关系
+  projectId?: string; // 所属项目
+  moduleId?: string; // 所属模块
   dependencies?: string[]; // 依赖的任务 ID
   assignedRole?: RoleType; // 负责的角色（项目经理或执行角色）
   ownerRole?: RoleType; // 任务所有者（项目经理，负责拆分和验收）

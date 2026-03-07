@@ -23,6 +23,65 @@ export interface ProjectVersion {
   status: 'active' | 'archived' | 'deprecated';
 }
 
+// ============ 阶段状态 ============
+export type StageStatus = 'pending' | 'in-progress' | 'completed' | 'failed';
+
+// ============ 阶段管理 ============
+export interface TaskStage {
+  id: string;
+  taskId: string;
+  moduleId: string;
+  name: string;
+  description?: string;
+  status: StageStatus;
+  roles: string[]; // 分配的角色
+  // 入口条件：什么必须完成才能进入此阶段
+  entryCriteria?: string[];
+  // 出口条件：什么定义了此阶段的完成
+  exitCriteria?: string[];
+  // 顺序或并行
+  executionMode: 'sequential' | 'parallel';
+  // 下一阶段配置
+  nextStages?: string[];
+  // 排序
+  order: number;
+  metadata: {
+    createdAt: Date;
+    updatedAt: Date;
+    tags?: string[];
+  };
+  // 执行结果
+  startedAt?: Date;
+  completedAt?: Date;
+  result?: any;
+  error?: string;
+}
+
+// ============ 任务管理 ============
+export interface ProjectTask {
+  id: string;
+  moduleId: string;
+  projectId: string;
+  type: string;
+  title: string;
+  description: string;
+  status: ProjectLifecycleStatus;
+  priority: 'low' | 'medium' | 'high' | 'critical';
+  // 分配的角色（支持多个）
+  assignedRoles?: string[];
+  // 依赖的任务
+  dependencies?: string[];
+  // 阶段列表
+  stages?: TaskStage[];
+  metadata: {
+    createdAt: Date;
+    updatedAt: Date;
+    tags?: string[];
+  };
+  startedAt?: Date;
+  completedAt?: Date;
+}
+
 // ============ 模块管理 ============
 export interface ProjectModule {
   id: string;
@@ -33,6 +92,7 @@ export interface ProjectModule {
   status: ProjectLifecycleStatus;
   dependencies?: string[];
   roles?: string[];
+  tasks?: ProjectTask[]; // 模块下的任务列表
   metadata: {
     createdAt: Date;
     updatedAt: Date;
@@ -208,4 +268,45 @@ export interface UpdateVersionInput {
   name?: string;
   description?: string;
   status?: 'active' | 'archived' | 'deprecated';
+}
+
+// ============ 任务操作接口 ============
+export interface CreateTaskInput {
+  title: string;
+  description?: string;
+  type?: string;
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  assignedRoles?: string[];
+  dependencies?: string[];
+}
+
+export interface UpdateTaskInput {
+  title?: string;
+  description?: string;
+  status?: ProjectLifecycleStatus;
+  priority?: 'low' | 'medium' | 'high' | 'critical';
+  assignedRoles?: string[];
+  dependencies?: string[];
+}
+
+// ============ 阶段操作接口 ============
+export interface CreateStageInput {
+  name: string;
+  description?: string;
+  roles?: string[];
+  entryCriteria?: string[];
+  exitCriteria?: string[];
+  executionMode?: 'sequential' | 'parallel';
+  nextStages?: string[];
+}
+
+export interface UpdateStageInput {
+  name?: string;
+  description?: string;
+  status?: StageStatus;
+  roles?: string[];
+  entryCriteria?: string[];
+  exitCriteria?: string[];
+  executionMode?: 'sequential' | 'parallel';
+  nextStages?: string[];
 }

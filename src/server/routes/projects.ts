@@ -12,19 +12,26 @@ import type {
   CreateModuleInput,
   UpdateModuleInput,
   ProjectVersion,
-  CreateVersionInput
+  CreateVersionInput,
+  ProjectTask,
+  TaskStage,
+  StageStatus
 } from '../../types/project.js';
 
 interface InMemoryProjectStore {
   projects: Map<string, Project>;
   modules: Map<string, ProjectModule>;
   versions: Map<string, ProjectVersion>;
+  tasks: Map<string, ProjectTask>;
+  stages: Map<string, TaskStage>;
 }
 
 const projectStore: InMemoryProjectStore = {
   projects: new Map(),
   modules: new Map(),
-  versions: new Map()
+  versions: new Map(),
+  tasks: new Map(),
+  stages: new Map()
 };
 
 export interface ProjectRouter {
@@ -468,6 +475,161 @@ export function createProjectRouter(
     }
   });
 
+  // ============ 任务管理路由 ============
+  router.get('/:id/modules/:moduleId/tasks', async (req: Request, res: Response) => {
+    try {
+      const tasks = await getModuleTasks(req);
+      res.json({
+        success: true,
+        data: tasks,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GET_TASKS_FAILED',
+          message: error.message || 'Failed to get tasks',
+        },
+      });
+    }
+  });
+
+  router.post('/:id/modules/:moduleId/tasks', async (req: Request, res: Response) => {
+    try {
+      const task = await createModuleTask(req, res);
+      res.status(201).json({
+        success: true,
+        data: task,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'CREATE_TASK_FAILED',
+          message: error.message || 'Failed to create task',
+        },
+      });
+    }
+  });
+
+  router.put('/:id/modules/:moduleId/tasks/:taskId', async (req: Request, res: Response) => {
+    try {
+      const task = await updateModuleTask(req, res);
+      if (!task) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'TASK_NOT_FOUND',
+            message: `Task not found: ${req.params.taskId}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        data: task,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'UPDATE_TASK_FAILED',
+          message: error.message || 'Failed to update task',
+        },
+      });
+    }
+  });
+
+  router.delete('/:id/modules/:moduleId/tasks/:taskId', async (req: Request, res: Response) => {
+    try {
+      const result = await deleteModuleTask(req, res);
+      if (!result.success) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'TASK_NOT_FOUND',
+            message: `Task not found: ${req.params.taskId}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'DELETE_TASK_FAILED',
+          message: error.message || 'Failed to delete task',
+        },
+      });
+    }
+  });
+
+  // ============ 阶段管理路由 ============
+  router.get('/:id/modules/:moduleId/tasks/:taskId/stages', async (req: Request, res: Response) => {
+    try {
+      const stages = await getTaskStages(req);
+      res.json({
+        success: true,
+        data: stages,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GET_STAGES_FAILED',
+          message: error.message || 'Failed to get stages',
+        },
+      });
+    }
+  });
+
+  router.post('/:id/modules/:moduleId/tasks/:taskId/stages', async (req: Request, res: Response) => {
+    try {
+      const stage = await createTaskStage(req, res);
+      res.status(201).json({
+        success: true,
+        data: stage,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'CREATE_STAGE_FAILED',
+          message: error.message || 'Failed to create stage',
+        },
+      });
+    }
+  });
+
+  router.patch('/:id/modules/:moduleId/tasks/:taskId/stages/:stageId', async (req: Request, res: Response) => {
+    try {
+      const stage = await updateTaskStage(req, res);
+      if (!stage) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'STAGE_NOT_FOUND',
+            message: `Stage not found: ${req.params.stageId}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        data: stage,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'UPDATE_STAGE_FAILED',
+          message: error.message || 'Failed to update stage',
+        },
+      });
+    }
+  });
+
   return router;
 }
 
@@ -665,6 +827,8 @@ export function clearProjectStore(): void {
   projectStore.projects.clear();
   projectStore.modules.clear();
   projectStore.versions.clear();
+  projectStore.tasks.clear();
+  projectStore.stages.clear();
 }
 
 // ============ 模块管理函数 ============
@@ -861,5 +1025,188 @@ async function updateProjectLifecycleStatus(
   };
 
   projectStore.projects.set(id, updated);
+  return updated;
+}
+
+// ============ 任务管理函数 ============
+async function getModuleTasks(req: Request): Promise<ProjectTask[]> {
+  const { id: projectId, moduleId } = req.params;
+  return Array.from(projectStore.tasks.values())
+    .filter(t => t.projectId === projectId && t.moduleId === moduleId);
+}
+
+async function createModuleTask(req: Request, _res: Response): Promise<ProjectTask> {
+  const { id: projectId, moduleId } = req.params;
+  const { title, description, type, priority, assignedRoles, dependencies } = req.body;
+
+  if (!title) {
+    throw new Error('Task title is required');
+  }
+
+  const task: ProjectTask = {
+    id: `task-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    projectId,
+    moduleId,
+    title,
+    description: description || '',
+    type: type || 'custom',
+    status: 'draft',
+    priority: priority || 'medium',
+    assignedRoles,
+    dependencies,
+    metadata: {
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+  };
+
+  projectStore.tasks.set(task.id, task);
+
+  // 更新模块的任务列表
+  const module = projectStore.modules.get(moduleId);
+  if (module) {
+    module.tasks = [...(module.tasks || []), task];
+    projectStore.modules.set(moduleId, module);
+  }
+
+  return task;
+}
+
+async function updateModuleTask(req: Request, _res: Response): Promise<ProjectTask | null> {
+  const { id: projectId, moduleId, taskId } = req.params;
+  const { title, description, status, priority, assignedRoles, dependencies } = req.body;
+
+  const existing = projectStore.tasks.get(taskId);
+  if (!existing || existing.projectId !== projectId || existing.moduleId !== moduleId) {
+    return null;
+  }
+
+  const updated: ProjectTask = {
+    ...existing,
+    title: title || existing.title,
+    description: description !== undefined ? description : existing.description,
+    status: status || existing.status,
+    priority: priority || existing.priority,
+    assignedRoles: assignedRoles || existing.assignedRoles,
+    dependencies: dependencies || existing.dependencies,
+    metadata: {
+      ...existing.metadata,
+      updatedAt: new Date(),
+    }
+  };
+
+  projectStore.tasks.set(taskId, updated);
+  return updated;
+}
+
+async function deleteModuleTask(req: Request, _res: Response): Promise<{ success: boolean; message: string }> {
+  const { id: projectId, moduleId, taskId } = req.params;
+
+  const existing = projectStore.tasks.get(taskId);
+  if (!existing || existing.projectId !== projectId || existing.moduleId !== moduleId) {
+    return { success: false, message: 'Task not found' };
+  }
+
+  // 删除关联的阶段
+  const stagesToDelete = Array.from(projectStore.stages.values())
+    .filter(s => s.taskId === taskId);
+  for (const stage of stagesToDelete) {
+    projectStore.stages.delete(stage.id);
+  }
+
+  projectStore.tasks.delete(taskId);
+
+  // 更新模块的任务列表
+  const module = projectStore.modules.get(moduleId);
+  if (module) {
+    module.tasks = (module.tasks || []).filter(t => t.id !== taskId);
+    projectStore.modules.set(moduleId, module);
+  }
+
+  return { success: true, message: `Task ${taskId} deleted successfully` };
+}
+
+// ============ 阶段管理函数 ============
+async function getTaskStages(req: Request): Promise<TaskStage[]> {
+  const { taskId } = req.params;
+  return Array.from(projectStore.stages.values())
+    .filter(s => s.taskId === taskId)
+    .sort((a, b) => a.order - b.order);
+}
+
+async function createTaskStage(req: Request, _res: Response): Promise<TaskStage> {
+  const { id: projectId, moduleId, taskId } = req.params;
+  const { name, description, roles, entryCriteria, exitCriteria, executionMode, nextStages } = req.body;
+
+  if (!name) {
+    throw new Error('Stage name is required');
+  }
+
+  // 验证任务存在
+  const task = projectStore.tasks.get(taskId);
+  if (!task || task.projectId !== projectId || task.moduleId !== moduleId) {
+    throw new Error('Task not found');
+  }
+
+  const existingStages = Array.from(projectStore.stages.values())
+    .filter(s => s.taskId === taskId);
+  const order = existingStages.length;
+
+  const stage: TaskStage = {
+    id: `stage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    taskId,
+    moduleId,
+    name,
+    description,
+    status: 'pending',
+    roles: roles || [],
+    entryCriteria,
+    exitCriteria,
+    executionMode: executionMode || 'sequential',
+    nextStages,
+    order,
+    metadata: {
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }
+  };
+
+  projectStore.stages.set(stage.id, stage);
+  return stage;
+}
+
+async function updateTaskStage(req: Request, _res: Response): Promise<TaskStage | null> {
+  const { id: projectId, moduleId, taskId, stageId } = req.params;
+  const { name, description, status, roles, entryCriteria, exitCriteria, executionMode, nextStages } = req.body;
+
+  const existing = projectStore.stages.get(stageId);
+  if (!existing || existing.taskId !== taskId || existing.moduleId !== moduleId) {
+    return null;
+  }
+
+  const updated: TaskStage = {
+    ...existing,
+    name: name || existing.name,
+    description: description !== undefined ? description : existing.description,
+    status: status || existing.status,
+    roles: roles || existing.roles,
+    entryCriteria: entryCriteria || existing.entryCriteria,
+    exitCriteria: exitCriteria || existing.exitCriteria,
+    executionMode: executionMode || existing.executionMode,
+    nextStages: nextStages || existing.nextStages,
+    metadata: {
+      ...existing.metadata,
+      updatedAt: new Date(),
+    }
+  };
+
+  // 更新执行时间
+  if (status === 'in-progress' && existing.status !== 'in-progress') {
+    updated.startedAt = new Date();
+  } else if (status === 'completed' && existing.status !== 'completed') {
+    updated.completedAt = new Date();
+  }
+
+  projectStore.stages.set(stageId, updated);
   return updated;
 }
