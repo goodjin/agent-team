@@ -1,14 +1,30 @@
 import { Router, Request, Response } from 'express';
 import { TaskManager } from '../../core/task-manager.js';
 import { AgentMgr } from '../../core/agent-mgr.js';
-import type { Project, ProjectStatus, ProjectFilters, CreateProjectInput, UpdateProjectInput } from '../../types/project.js';
+import type {
+  Project,
+  ProjectStatus,
+  ProjectLifecycleStatus,
+  ProjectFilters,
+  CreateProjectInput,
+  UpdateProjectInput,
+  ProjectModule,
+  CreateModuleInput,
+  UpdateModuleInput,
+  ProjectVersion,
+  CreateVersionInput
+} from '../../types/project.js';
 
 interface InMemoryProjectStore {
   projects: Map<string, Project>;
+  modules: Map<string, ProjectModule>;
+  versions: Map<string, ProjectVersion>;
 }
 
 const projectStore: InMemoryProjectStore = {
-  projects: new Map()
+  projects: new Map(),
+  modules: new Map(),
+  versions: new Map()
 };
 
 export interface ProjectRouter {
@@ -17,8 +33,19 @@ export interface ProjectRouter {
   createProject(req: Request, res: Response): Promise<void>;
   updateProject(req: Request, res: Response): Promise<void>;
   updateProjectStatus(req: Request, res: Response): Promise<void>;
+  updateProjectLifecycleStatus(req: Request, res: Response): Promise<void>;
   deleteProject(req: Request, res: Response): Promise<void>;
   getProjectStats(req: Request, res: Response): Promise<void>;
+  // 模块管理
+  getModules(req: Request, res: Response): Promise<void>;
+  createModule(req: Request, res: Response): Promise<void>;
+  updateModule(req: Request, res: Response): Promise<void>;
+  deleteModule(req: Request, res: Response): Promise<void>;
+  // 版本管理
+  getVersions(req: Request, res: Response): Promise<void>;
+  createVersion(req: Request, res: Response): Promise<void>;
+  updateVersion(req: Request, res: Response): Promise<void>;
+  deleteVersion(req: Request, res: Response): Promise<void>;
 }
 
 export function createProjectRouter(
@@ -220,6 +247,227 @@ export function createProjectRouter(
     }
   });
 
+  // ============ 生命周期状态更新 ============
+  router.patch('/:id/lifecycle', async (req: Request, res: Response) => {
+    try {
+      const { lifecycleStatus } = req.body;
+      const validStatuses: ProjectLifecycleStatus[] = ['draft', 'in-progress', 'review', 'completed'];
+      if (!validStatuses.includes(lifecycleStatus)) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'INVALID_LIFECYCLE_STATUS',
+            message: 'Invalid lifecycle status. Must be draft, in-progress, review, or completed',
+          },
+        });
+      }
+      const project = await updateProjectLifecycleStatus(req, res, lifecycleStatus);
+      if (!project) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'PROJECT_NOT_FOUND',
+            message: `Project not found: ${req.params.id}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        data: project,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'UPDATE_LIFECYCLE_STATUS_FAILED',
+          message: error.message || 'Failed to update lifecycle status',
+        },
+      });
+    }
+  });
+
+  // ============ 模块管理路由 ============
+  router.get('/:id/modules', async (req: Request, res: Response) => {
+    try {
+      const modules = await getModules(req);
+      res.json({
+        success: true,
+        data: modules,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GET_MODULES_FAILED',
+          message: error.message || 'Failed to get modules',
+        },
+      });
+    }
+  });
+
+  router.post('/:id/modules', async (req: Request, res: Response) => {
+    try {
+      const module = await createModule(req, res);
+      res.status(201).json({
+        success: true,
+        data: module,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'CREATE_MODULE_FAILED',
+          message: error.message || 'Failed to create module',
+        },
+      });
+    }
+  });
+
+  router.put('/:id/modules/:moduleId', async (req: Request, res: Response) => {
+    try {
+      const module = await updateModule(req, res);
+      if (!module) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'MODULE_NOT_FOUND',
+            message: `Module not found: ${req.params.moduleId}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        data: module,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'UPDATE_MODULE_FAILED',
+          message: error.message || 'Failed to update module',
+        },
+      });
+    }
+  });
+
+  router.delete('/:id/modules/:moduleId', async (req: Request, res: Response) => {
+    try {
+      const result = await deleteModule(req, res);
+      if (!result.success) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'MODULE_NOT_FOUND',
+            message: `Module not found: ${req.params.moduleId}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'DELETE_MODULE_FAILED',
+          message: error.message || 'Failed to delete module',
+        },
+      });
+    }
+  });
+
+  // ============ 版本管理路由 ============
+  router.get('/:id/versions', async (req: Request, res: Response) => {
+    try {
+      const versions = await getVersions(req);
+      res.json({
+        success: true,
+        data: versions,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'GET_VERSIONS_FAILED',
+          message: error.message || 'Failed to get versions',
+        },
+      });
+    }
+  });
+
+  router.post('/:id/versions', async (req: Request, res: Response) => {
+    try {
+      const version = await createVersion(req, res);
+      res.status(201).json({
+        success: true,
+        data: version,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'CREATE_VERSION_FAILED',
+          message: error.message || 'Failed to create version',
+        },
+      });
+    }
+  });
+
+  router.put('/:id/versions/:versionId', async (req: Request, res: Response) => {
+    try {
+      const version = await updateVersion(req, res);
+      if (!version) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'VERSION_NOT_FOUND',
+            message: `Version not found: ${req.params.versionId}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        data: version,
+      });
+    } catch (error: any) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'UPDATE_VERSION_FAILED',
+          message: error.message || 'Failed to update version',
+        },
+      });
+    }
+  });
+
+  router.delete('/:id/versions/:versionId', async (req: Request, res: Response) => {
+    try {
+      const result = await deleteVersion(req, res);
+      if (!result.success) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'VERSION_NOT_FOUND',
+            message: `Version not found: ${req.params.versionId}`,
+          },
+        });
+      }
+      res.json({
+        success: true,
+        message: result.message,
+      });
+    } catch (error: any) {
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'DELETE_VERSION_FAILED',
+          message: error.message || 'Failed to delete version',
+        },
+      });
+    }
+  });
+
   return router;
 }
 
@@ -257,7 +505,7 @@ async function getProject(req: Request, _res: Response): Promise<Project | null>
 }
 
 async function createProject(req: Request, _res: Response, input: CreateProjectInput): Promise<Project> {
-  const { name, path, description, visibility, config } = input;
+  const { name, path, description, visibility, config, modules } = input;
 
   if (!name || !path) {
     throw new Error('Project name and path are required');
@@ -269,21 +517,56 @@ async function createProject(req: Request, _res: Response, input: CreateProjectI
     ? { ...config, projectName: name, projectPath: path }
     : { projectName: name, projectPath: path };
 
+  // 创建初始模块
+  const createdModules: ProjectModule[] = [];
+  if (modules && modules.length > 0) {
+    for (let i = 0; i < modules.length; i++) {
+      const mod = modules[i];
+      createdModules.push({
+        id: `mod-${Date.now()}-${i}`,
+        projectId: id,
+        name: mod.name || 'Unnamed Module',
+        description: mod.description,
+        version: mod.version || '1.0.0',
+        status: 'draft',
+        dependencies: mod.dependencies,
+        roles: mod.roles,
+        metadata: {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          order: i,
+          tags: mod.tags
+        }
+      });
+    }
+  }
+
   const project: Project = {
     id,
     name,
     path,
     description: description || '',
     status: 'active',
+    lifecycleStatus: 'draft', // 默认生命周期状态
     visibility: visibility || 'private',
     config: projectConfig,
+    modules: createdModules,
+    versions: [],
+    currentVersion: '1.0.0',
     metadata: {
       createdAt: new Date(),
       updatedAt: new Date(),
+      version: '1.0.0'
     },
   };
 
   projectStore.projects.set(id, project);
+
+  // 保存模块到store
+  for (const mod of createdModules) {
+    projectStore.modules.set(mod.id, mod);
+  }
+
   return project;
 }
 
@@ -304,6 +587,7 @@ async function updateProject(req: Request, _res: Response, input: UpdateProjectI
     name: input.name || existing.name,
     description: input.description !== undefined ? input.description : existing.description,
     status: input.status || existing.status,
+    lifecycleStatus: input.lifecycleStatus || existing.lifecycleStatus,
     visibility: input.visibility || existing.visibility,
     config: updatedConfig,
     metadata: {
@@ -379,4 +663,203 @@ export function addTestProject(project: Project): void {
 
 export function clearProjectStore(): void {
   projectStore.projects.clear();
+  projectStore.modules.clear();
+  projectStore.versions.clear();
+}
+
+// ============ 模块管理函数 ============
+async function getModules(req: Request): Promise<ProjectModule[]> {
+  const { id: projectId } = req.params;
+  return Array.from(projectStore.modules.values()).filter(m => m.projectId === projectId);
+}
+
+async function createModule(req: Request, _res: Response): Promise<ProjectModule> {
+  const { id: projectId } = req.params;
+  const input: CreateModuleInput = req.body;
+
+  if (!input.name) {
+    throw new Error('Module name is required');
+  }
+
+  const existingModules = Array.from(projectStore.modules.values())
+    .filter(m => m.projectId === projectId);
+  const order = existingModules.length;
+
+  const module: ProjectModule = {
+    id: `mod-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    projectId,
+    name: input.name,
+    description: input.description,
+    version: input.version || '1.0.0',
+    status: 'draft',
+    dependencies: input.dependencies,
+    roles: input.roles,
+    metadata: {
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      order,
+      tags: input.tags
+    }
+  };
+
+  projectStore.modules.set(module.id, module);
+
+  // 更新项目的modules列表
+  const project = projectStore.projects.get(projectId);
+  if (project) {
+    project.modules = [...(project.modules || []), module];
+    projectStore.projects.set(projectId, project);
+  }
+
+  return module;
+}
+
+async function updateModule(req: Request, _res: Response): Promise<ProjectModule | null> {
+  const { id: projectId, moduleId } = req.params;
+  const input: UpdateModuleInput = req.body;
+
+  const existing = projectStore.modules.get(moduleId);
+  if (!existing || existing.projectId !== projectId) {
+    return null;
+  }
+
+  const updated: ProjectModule = {
+    ...existing,
+    name: input.name || existing.name,
+    description: input.description !== undefined ? input.description : existing.description,
+    status: input.status || existing.status,
+    dependencies: input.dependencies || existing.dependencies,
+    roles: input.roles || existing.roles,
+    metadata: {
+      ...existing.metadata,
+      updatedAt: new Date(),
+      tags: input.tags || existing.metadata.tags
+    }
+  };
+
+  projectStore.modules.set(moduleId, updated);
+  return updated;
+}
+
+async function deleteModule(req: Request, _res: Response): Promise<{ success: boolean; message: string }> {
+  const { id: projectId, moduleId } = req.params;
+
+  const existing = projectStore.modules.get(moduleId);
+  if (!existing || existing.projectId !== projectId) {
+    return { success: false, message: 'Module not found' };
+  }
+
+  projectStore.modules.delete(moduleId);
+
+  // 更新项目的modules列表
+  const project = projectStore.projects.get(projectId);
+  if (project) {
+    project.modules = (project.modules || []).filter(m => m.id !== moduleId);
+    projectStore.projects.set(projectId, project);
+  }
+
+  return { success: true, message: `Module ${moduleId} deleted successfully` };
+}
+
+// ============ 版本管理函数 ============
+async function getVersions(req: Request): Promise<ProjectVersion[]> {
+  const { id: projectId } = req.params;
+  return Array.from(projectStore.versions.values()).filter(v => v.projectId === projectId);
+}
+
+async function createVersion(req: Request, _res: Response): Promise<ProjectVersion> {
+  const { id: projectId } = req.params;
+  const input: CreateVersionInput = req.body;
+
+  if (!input.version || !input.name) {
+    throw new Error('Version and name are required');
+  }
+
+  const version: ProjectVersion = {
+    id: `ver-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+    projectId,
+    version: input.version,
+    name: input.name,
+    description: input.description,
+    createdAt: new Date(),
+    changes: input.changes,
+    status: 'active'
+  };
+
+  projectStore.versions.set(version.id, version);
+
+  // 更新项目的versions列表和当前版本
+  const project = projectStore.projects.get(projectId);
+  if (project) {
+    project.versions = [...(project.versions || []), version];
+    project.currentVersion = input.version;
+    projectStore.projects.set(projectId, project);
+  }
+
+  return version;
+}
+
+async function updateVersion(req: Request, _res: Response): Promise<ProjectVersion | null> {
+  const { id: projectId, versionId } = req.params;
+  const input: { name?: string; description?: string; status?: 'active' | 'archived' | 'deprecated' } = req.body;
+
+  const existing = projectStore.versions.get(versionId);
+  if (!existing || existing.projectId !== projectId) {
+    return null;
+  }
+
+  const updated: ProjectVersion = {
+    ...existing,
+    name: input.name || existing.name,
+    description: input.description !== undefined ? input.description : existing.description,
+    status: input.status || existing.status
+  };
+
+  projectStore.versions.set(versionId, updated);
+  return updated;
+}
+
+async function deleteVersion(req: Request, _res: Response): Promise<{ success: boolean; message: string }> {
+  const { id: projectId, versionId } = req.params;
+
+  const existing = projectStore.versions.get(versionId);
+  if (!existing || existing.projectId !== projectId) {
+    return { success: false, message: 'Version not found' };
+  }
+
+  projectStore.versions.delete(versionId);
+
+  // 更新项目的versions列表
+  const project = projectStore.projects.get(projectId);
+  if (project) {
+    project.versions = (project.versions || []).filter(v => v.id !== versionId);
+    projectStore.projects.set(projectId, project);
+  }
+
+  return { success: true, message: `Version ${versionId} deleted successfully` };
+}
+
+async function updateProjectLifecycleStatus(
+  req: Request,
+  _res: Response,
+  lifecycleStatus: ProjectLifecycleStatus
+): Promise<Project | null> {
+  const { id } = req.params;
+  const existing = projectStore.projects.get(id);
+
+  if (!existing) {
+    return null;
+  }
+
+  const updated: Project = {
+    ...existing,
+    lifecycleStatus,
+    metadata: {
+      ...existing.metadata,
+      updatedAt: new Date(),
+    },
+  };
+
+  projectStore.projects.set(id, updated);
+  return updated;
 }

@@ -530,13 +530,24 @@
                 <div class="page-header">
                     <div>
                         <h2>📁 项目管理</h2>
-                        <p class="subtitle">多项目隔离管理</p>
+                        <p class="subtitle">多项目隔离管理 - 支持模块化开发和版本控制</p>
                     </div>
                     <button class="btn btn-primary" onclick="showCreateProjectModal()">
                         ➕ 创建项目
                     </button>
                 </div>
-                
+
+                <!-- 筛选器 -->
+                <div class="filters-bar">
+                    <select id="filter-lifecycle" class="filter-select">
+                        <option value="">所有状态</option>
+                        <option value="draft">草稿</option>
+                        <option value="in-progress">进行中</option>
+                        <option value="review">审核中</option>
+                        <option value="completed">已完成</option>
+                    </select>
+                </div>
+
                 <!-- 当前项目 -->
                 <div class="current-project-section">
                     <h3>当前项目</h3>
@@ -544,6 +555,9 @@
                         <div class="project-info">
                             <div class="project-name" id="current-project-name">加载中...</div>
                             <div class="project-path" id="current-project-path">-</div>
+                            <div class="lifecycle-status" id="current-lifecycle-status">
+                                <span class="lifecycle-badge draft">草稿</span>
+                            </div>
                         </div>
                         <div class="project-stats">
                             <div class="project-stat">
@@ -551,8 +565,12 @@
                                 <span class="ps-label">任务</span>
                             </div>
                             <div class="project-stat">
-                                <span class="ps-value" id="current-agents">0</span>
-                                <span class="ps-label">智能体</span>
+                                <span class="ps-value" id="current-modules">0</span>
+                                <span class="ps-label">模块</span>
+                            </div>
+                            <div class="project-stat">
+                                <span class="ps-value" id="current-version">v1.0.0</span>
+                                <span class="ps-label">版本</span>
                             </div>
                             <div class="project-stat">
                                 <span class="ps-value" id="current-completion">0%</span>
@@ -561,7 +579,43 @@
                         </div>
                     </div>
                 </div>
-                
+
+                <!-- 模块和版本管理 -->
+                <div class="project-detail-section" id="project-detail-section" style="display: none;">
+                    <div class="detail-tabs">
+                        <button class="tab-btn active" data-tab="modules" onclick="switchProjectTab('modules')">📦 模块管理</button>
+                        <button class="tab-btn" data-tab="versions" onclick="switchProjectTab('versions')">🏷️ 版本管理</button>
+                    </div>
+
+                    <!-- 模块管理 -->
+                    <div class="tab-content active" id="tab-modules">
+                        <div class="section-header">
+                            <h4>项目模块</h4>
+                            <button class="btn btn-sm btn-secondary" onclick="showCreateModuleModal()">➕ 添加模块</button>
+                        </div>
+                        <div id="modules-list" class="modules-grid">
+                            <div class="empty-state">
+                                <span class="empty-icon">📦</span>
+                                <p>暂无模块</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 版本管理 -->
+                    <div class="tab-content" id="tab-versions">
+                        <div class="section-header">
+                            <h4>版本历史</h4>
+                            <button class="btn btn-sm btn-secondary" onclick="showCreateVersionModal()">➕ 创建版本</button>
+                        </div>
+                        <div id="versions-list" class="versions-timeline">
+                            <div class="empty-state">
+                                <span class="empty-icon">🏷️</span>
+                                <p>暂无版本</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- 项目列表 -->
                 <div class="projects-list-section">
                     <h3>所有项目</h3>
@@ -917,6 +971,80 @@
                 <button class="modal-close">&times;</button>
             </div>
             <div class="modal-body" id="project-detail-body">
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建模块模态框 -->
+    <div id="modal-create-module" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📦 创建模块</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-create-module">
+                    <div class="form-group">
+                        <label>模块名称 *</label>
+                        <input type="text" id="module-name" placeholder="输入模块名称" required>
+                    </div>
+                    <div class="form-group">
+                        <label>模块描述</label>
+                        <textarea id="module-description" rows="3" placeholder="描述模块的功能..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>版本</label>
+                        <input type="text" id="module-version" placeholder="1.0.0" value="1.0.0">
+                    </div>
+                    <div class="form-group">
+                        <label>角色</label>
+                        <select id="module-roles" multiple>
+                            <option value="product-manager">产品经理</option>
+                            <option value="architect">架构师</option>
+                            <option value="developer">开发者</option>
+                            <option value="tester">测试工程师</option>
+                            <option value="doc-writer">文档工程师</option>
+                        </select>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary modal-close">取消</button>
+                        <button type="submit" class="btn btn-primary">创建模块</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- 创建版本模态框 -->
+    <div id="modal-create-version" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>🏷️ 创建版本</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="form-create-version">
+                    <div class="form-group">
+                        <label>版本号 *</label>
+                        <input type="text" id="version-number" placeholder="例如: 1.0.0" required>
+                    </div>
+                    <div class="form-group">
+                        <label>版本名称 *</label>
+                        <input type="text" id="version-name" placeholder="例如: 初始版本" required>
+                    </div>
+                    <div class="form-group">
+                        <label>版本描述</label>
+                        <textarea id="version-description" rows="3" placeholder="描述这个版本的内容..."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>变更内容 (每行一条)</label>
+                        <textarea id="version-changes" rows="4" placeholder="新增功能：&#10;修复问题：&#10;优化改进："></textarea>
+                    </div>
+                    <div class="form-actions">
+                        <button type="button" class="btn btn-secondary modal-close">取消</button>
+                        <button type="submit" class="btn btn-primary">创建版本</button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>

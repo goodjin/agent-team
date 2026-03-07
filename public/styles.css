@@ -2291,12 +2291,386 @@ body {
     .page {
         padding: 1rem;
     }
-    
+
     .search-box {
         display: none;
     }
-    
+
     .form-row {
         grid-template-columns: 1fr;
     }
+}
+
+/* ============ 生命周期状态样式 ============ */
+.lifecycle-status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.lifecycle-badge {
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.lifecycle-badge.draft {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.lifecycle-badge.in-progress {
+    background: #dbeafe;
+    color: #1d4ed8;
+    border: 1px solid #3b82f6;
+}
+
+.lifecycle-badge.review {
+    background: #fef3c7;
+    color: #b45309;
+    border: 1px solid #f59e0b;
+}
+
+.lifecycle-badge.completed {
+    background: #d1fae5;
+    color: #047857;
+    border: 1px solid #10b981;
+}
+
+/* ============ 模块和版本管理样式 ============ */
+.filters-bar {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.filter-select {
+    padding: 0.5rem 1rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.875rem;
+    cursor: pointer;
+}
+
+.filter-select:focus {
+    outline: none;
+    border-color: var(--primary-color);
+}
+
+.project-detail-section {
+    margin: 2rem 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+}
+
+.detail-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+.tab-btn {
+    padding: 1rem 1.5rem;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition-normal);
+    border-bottom: 2px solid transparent;
+}
+
+.tab-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-primary);
+}
+
+.tab-btn.active {
+    color: var(--primary-color);
+    border-bottom-color: var(--primary-color);
+    background: var(--bg-primary);
+}
+
+.tab-content {
+    display: none;
+    padding: 1.5rem;
+}
+
+.tab-content.active {
+    display: block;
+}
+
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.section-header h4 {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
+/* 模块网格 */
+.modules-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1rem;
+}
+
+.module-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 1rem;
+    transition: all var(--transition-normal);
+}
+
+.module-card:hover {
+    border-color: var(--primary-color);
+    box-shadow: var(--shadow-md);
+}
+
+.module-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+}
+
+.module-name {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.module-version {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    background: var(--bg-primary);
+    padding: 0.125rem 0.5rem;
+    border-radius: var(--radius-sm);
+}
+
+.module-description {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+.module-meta {
+    display: flex;
+    gap: 1rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.module-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.75rem;
+}
+
+/* 版本时间线 */
+.versions-timeline {
+    position: relative;
+    padding-left: 2rem;
+}
+
+.versions-timeline::before {
+    content: '';
+    position: absolute;
+    left: 0.5rem;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: var(--border-color);
+}
+
+.version-item {
+    position: relative;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+.version-item::before {
+    content: '';
+    position: absolute;
+    left: -1.75rem;
+    top: 1.25rem;
+    width: 0.75rem;
+    height: 0.75rem;
+    background: var(--primary-color);
+    border-radius: 50%;
+    border: 2px solid var(--bg-primary);
+}
+
+.version-item.active::before {
+    background: #10b981;
+    box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.2);
+}
+
+.version-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 0.5rem;
+}
+
+.version-number {
+    font-weight: 600;
+    font-size: 1rem;
+}
+
+.version-badge {
+    font-size: 0.625rem;
+    padding: 0.125rem 0.5rem;
+    border-radius: var(--radius-full);
+    text-transform: uppercase;
+}
+
+.version-badge.active {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.version-badge.archived {
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+}
+
+.version-badge.deprecated {
+    background: #fee2e2;
+    color: #dc2626;
+}
+
+.version-name {
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+    margin-bottom: 0.5rem;
+}
+
+.version-changes {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.version-changes ul {
+    margin: 0;
+    padding-left: 1rem;
+}
+
+.version-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 0.75rem;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+/* ============ 工作流 Stage 可视化样式 ============ */
+.workflow-stages {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin: 1rem 0;
+}
+
+.stage-item {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-normal);
+}
+
+.stage-item:hover {
+    border-color: var(--primary-color);
+}
+
+.stage-connector {
+    width: 2rem;
+    height: 2rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-primary);
+    border-radius: 50%;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.stage-connector.completed {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.stage-connector.active {
+    background: #dbeafe;
+    color: #1d4ed8;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.stage-info {
+    flex: 1;
+}
+
+.stage-name {
+    font-weight: 600;
+    margin-bottom: 0.25rem;
+}
+
+.stage-roles {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.stage-status {
+    padding: 0.25rem 0.75rem;
+    border-radius: var(--radius-full);
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.stage-status.pending {
+    background: var(--bg-primary);
+    color: var(--text-secondary);
+}
+
+.stage-status.running {
+    background: #dbeafe;
+    color: #1d4ed8;
+}
+
+.stage-status.completed {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.stage-status.failed {
+    background: #fee2e2;
+    color: #dc2626;
 }

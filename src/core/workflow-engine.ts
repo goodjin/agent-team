@@ -1,11 +1,15 @@
 import type {
   Workflow,
   WorkflowStepConfig,
+  WorkflowStageConfig,
   WorkflowExecution,
   WorkflowExecutionContext,
   StepExecutionResult,
+  StageExecutionResult,
   WorkflowEvent,
-  WorkflowTemplate
+  WorkflowTemplate,
+  NextStageConfig,
+  ConditionalBranch
 } from '../types/workflow.js';
 import type { ToolResult, Task, RoleType, TaskType, TaskConstraints } from '../types/index.js';
 import type { ProjectAgent } from './project-agent.js';
@@ -737,5 +741,443 @@ export class WorkflowEngine extends EventEmitter {
         workflow: this.workflows.get('template-documentation')!
       }
     ];
+  }
+
+  // ============ Stage-based Workflow 执行方法 ============
+
+  /**
+   * 执行基于Stage的工作流
+   */
+  async executeStageWorkflow(
+    workflowId: string,
+    input?: Record<string, any>
+  ): Promise<WorkflowExecution> {
+    const workflow = this.workflows.get(workflowId);
+    if (!workflow) {
+      throw new Error(`Workflow not found: ${workflowId}`);
+    }
+
+    if (!workflow.stages || workflow.stages.length === 0) {
+      throw new Error(`Workflow ${workflowId} has no stages defined`);
+    }
+
+    const executionId = `exec-${Date.now()}-${++this.executionCounter}`;
+    const context: WorkflowExecutionContext = {
+      workflow,
+      variables: new Map(Object.entries(input || {})),
+      stepResults: new Map(),
+      currentStep: null,
+      status: 'running',
+      startedAt: new Date()
+    };
+
+    const execution: WorkflowExecution = {
+      id: executionId,
+      workflowId,
+      status: 'running',
+      context,
+      results: [],
+      startedAt: new Date()
+    };
+
+    this.executions.set(executionId, execution);
+
+    this.emit('workflow:started', {
+      type: 'workflow:started',
+      timestamp: new Date(),
+      executionId,
+      data: { workflowId, workflowName: workflow.name, mode: 'stage' }
+    });
+
+    try {
+      // 按order排序stages
+      const sortedStages = [...workflow.stages].sort((a, b) => a.order - b.order);
+
+      // 追踪已完成的stages
+      const completedStages = new Set<string>();
+
+      for (const stage of sortedStages) {
+        // 检查入口条件
+        if (!this.checkEntryCriteria(stage, context, completedStages)) {
+          this.emit('step:skipped', {
+            type: 'step:skipped',
+            timestamp: new Date(),
+            executionId,
+            stepId: stage.id,
+            data: { stageName: stage.name, reason: 'entry criteria not met' }
+          });
+          continue;
+        }
+
+        // 执行stage
+        const stageResult = await this.executeStage(execution, stage, context);
+        const stepResult: StepExecutionResult = {
+          step: {
+            id: stage.id,
+            name: stage.name,
+            type: 'task',
+            role: stage.roles[0] || 'developer',
+            description: stage.description
+          },
+          status: stageResult.status === 'completed' ? 'completed' : stageResult.status,
+          startedAt: stageResult.startedAt,
+          completedAt: stageResult.completedAt,
+          duration: stageResult.duration,
+          result: stageResult.result,
+          error: stageResult.error,
+          retryCount: 0,
+          outputs: stageResult.outputs
+        };
+        execution.results.push(stepResult);
+
+        if (stageResult.status === 'failed' && !workflow.settings?.continueOnFailure) {
+          context.status = 'failed';
+          context.error = `Stage ${stage.name} failed: ${stageResult.error}`;
+          break;
+        }
+
+        if (stageResult.status === 'completed') {
+          completedStages.add(stage.id);
+        }
+      }
+
+      if (context.status === 'running') {
+        context.status = execution.results.some(r => r.status === 'failed')
+          ? 'failed'
+          : 'completed';
+      }
+
+      context.completedAt = new Date();
+      execution.completedAt = context.completedAt;
+      execution.totalDuration = context.completedAt.getTime() - execution.startedAt.getTime();
+
+      if (context.status === 'completed') {
+        this.emit('workflow:completed', {
+          type: 'workflow:completed',
+          timestamp: new Date(),
+          executionId,
+          data: { workflowId, duration: execution.totalDuration, mode: 'stage' }
+        });
+      } else {
+        this.emit('workflow:failed', {
+          type: 'workflow:failed',
+          timestamp: new Date(),
+          executionId,
+          data: { workflowId, error: context.error }
+        });
+      }
+    } catch (error) {
+      context.status = 'failed';
+      context.error = error instanceof Error ? error.message : String(error);
+      context.completedAt = new Date();
+      execution.completedAt = context.completedAt;
+      execution.totalDuration = context.completedAt.getTime() - execution.startedAt.getTime();
+
+      this.emit('workflow:failed', {
+        type: 'workflow:failed',
+        timestamp: new Date(),
+        executionId,
+        data: { workflowId, error: context.error }
+      });
+    }
+
+    execution.status = context.status;
+    return execution;
+  }
+
+  /**
+   * 检查入口条件
+   */
+  private checkEntryCriteria(
+    stage: WorkflowStageConfig,
+    context: WorkflowExecutionContext,
+    completedStages: Set<string>
+  ): boolean {
+    if (!stage.entryCriteria || stage.entryCriteria.length === 0) {
+      return true;
+    }
+
+    for (const criteria of stage.entryCriteria) {
+      // 检查依赖的stage是否已完成
+      if (criteria.startsWith('stage:')) {
+        const requiredStageId = criteria.substring(6);
+        if (!completedStages.has(requiredStageId)) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * 执行单个Stage
+   */
+  private async executeStage(
+    execution: WorkflowExecution,
+    stage: WorkflowStageConfig,
+    context: WorkflowExecutionContext
+  ): Promise<StageExecutionResult> {
+    const result: StageExecutionResult = {
+      stageId: stage.id,
+      status: 'running',
+      startedAt: new Date(),
+      outputs: new Map()
+    };
+
+    this.emit('step:started', {
+      type: 'step:started',
+      timestamp: new Date(),
+      executionId: execution.id,
+      stepId: stage.id,
+      data: { stageName: stage.name, roles: stage.roles }
+    });
+
+    try {
+      const timeout = stage.timeout || 300000;
+
+      // 如果有steps配置，执行steps
+      if (stage.steps && stage.steps.length > 0) {
+        if (stage.parallel) {
+          // 并行执行
+          const parallelResults = await this.executeParallelStages(
+            execution,
+            stage.steps,
+            context
+          );
+          result.result = parallelResults;
+        } else {
+          // 顺序执行
+          for (const step of stage.steps) {
+            const stepResult = await this.executeStep(execution, step);
+            result.stepResults?.push(stepResult);
+
+            if (stepResult.status === 'failed') {
+              result.status = 'failed';
+              result.error = `Step ${step.name} failed: ${stepResult.error}`;
+              break;
+            }
+          }
+        }
+      } else if (stage.taskConfig) {
+        // 直接执行任务配置
+        const task: Task = {
+          id: `task-${Date.now()}`,
+          type: stage.taskConfig.type,
+          title: stage.name,
+          description: stage.description || '',
+          status: 'pending',
+          priority: 'medium',
+          assignedRole: stage.roles[0] as RoleType,
+          input: {
+            variables: Object.fromEntries(context.variables),
+            ...stage.taskConfig.input
+          },
+          createdAt: new Date(),
+          updatedAt: new Date()
+        };
+
+        const taskResult = await this.agent.execute(task);
+
+        if (taskResult.success) {
+          result.result = taskResult.data;
+          context.variables.set(`stage.${stage.id}.output`, taskResult.data);
+        } else {
+          result.status = 'failed';
+          result.error = taskResult.error;
+        }
+      }
+
+      // 检查出口条件
+      if (result.status === 'running' && stage.exitCriteria) {
+        const exitMet = this.checkExitCriteria(stage, context, result);
+        if (!exitMet) {
+          result.status = 'failed';
+          result.error = 'Exit criteria not met';
+        }
+      }
+
+      // 处理条件分支
+      if (stage.conditionals && stage.conditionals.length > 0 && result.status === 'completed') {
+        const nextStage = this.evaluateConditionals(stage.conditionals, context, result);
+        if (nextStage) {
+          result.outputs.set('nextStage', nextStage);
+        }
+      }
+
+      if (result.status === 'running') {
+        result.status = 'completed';
+      }
+    } catch (error) {
+      result.status = 'failed';
+      result.error = error instanceof Error ? error.message : String(error);
+    }
+
+    result.completedAt = new Date();
+    result.duration = result.completedAt.getTime() - result.startedAt!.getTime();
+
+    if (result.status === 'completed') {
+      this.emit('step:completed', {
+        type: 'step:completed',
+        timestamp: new Date(),
+        executionId: execution.id,
+        stepId: stage.id,
+        data: { stageName: stage.name, duration: result.duration }
+      });
+    } else {
+      this.emit('step:failed', {
+        type: 'step:failed',
+        timestamp: new Date(),
+        executionId: execution.id,
+        stepId: stage.id,
+        data: { stageName: stage.name, error: result.error }
+      });
+    }
+
+    return result;
+  }
+
+  /**
+   * 检查出口条件
+   */
+  private checkExitCriteria(
+    stage: WorkflowStageConfig,
+    context: WorkflowExecutionContext,
+    result: StageExecutionResult
+  ): boolean {
+    if (!stage.exitCriteria || stage.exitCriteria.length === 0) {
+      return true;
+    }
+
+    for (const criteria of stage.exitCriteria) {
+      // 可以扩展更多条件检查逻辑
+      if (criteria === 'task.completed') {
+        if (result.status !== 'completed') return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
+   * 评估条件分支
+   */
+  private evaluateConditionals(
+    conditionals: ConditionalBranch[],
+    context: WorkflowExecutionContext,
+    result: StageExecutionResult
+  ): NextStageConfig | null {
+    for (const branch of conditionals) {
+      try {
+        const variables = {
+          ...Object.fromEntries(context.variables),
+          result: result.result,
+          status: result.status
+        };
+        const fn = new Function('variables', `return ${branch.condition}`);
+        if (fn(variables)) {
+          return {
+            stageId: branch.targetStageId,
+            condition: branch.condition,
+            label: branch.name
+          };
+        }
+      } catch {
+        // 忽略评估错误
+      }
+    }
+    return null;
+  }
+
+  /**
+   * 并行执行stages
+   */
+  private async executeParallelStages(
+    execution: WorkflowExecution,
+    steps: WorkflowStepConfig[],
+    context: WorkflowExecutionContext
+  ): Promise<any[]> {
+    const promises = steps.map(step => this.executeStep(execution, step));
+    return Promise.all(promises);
+  }
+
+  /**
+   * 创建带Stage的工作流
+   */
+  async createStageWorkflow(definition: Omit<Workflow, 'id'>): Promise<Workflow> {
+    const id = `wf-stage-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const workflow: Workflow = {
+      ...definition,
+      id
+    };
+
+    this.validateStageWorkflow(workflow);
+    this.workflows.set(id, workflow);
+    return workflow;
+  }
+
+  /**
+   * 验证Stage工作流
+   */
+  private validateStageWorkflow(workflow: Workflow): void {
+    if (!workflow.stages || workflow.stages.length === 0) {
+      throw new Error('Stage workflow must have at least one stage');
+    }
+
+    const stageIds = new Set(workflow.stages.map(s => s.id));
+
+    // 验证stage引用有效
+    for (const stage of workflow.stages) {
+      if (stage.nextStages) {
+        for (const next of stage.nextStages) {
+          if (!stageIds.has(next.stageId)) {
+            throw new Error(`Stage ${stage.id} references invalid next stage: ${next.stageId}`);
+          }
+        }
+      }
+
+      if (stage.conditionals) {
+        for (const conditional of stage.conditionals) {
+          if (!stageIds.has(conditional.targetStageId)) {
+            throw new Error(`Stage ${stage.id} has conditional to invalid stage: ${conditional.targetStageId}`);
+          }
+        }
+      }
+    }
+
+    // 检查循环依赖
+    this.checkStageCycles(workflow.stages);
+  }
+
+  /**
+   * 检查Stage循环依赖
+   */
+  private checkStageCycles(stages: WorkflowStageConfig[]): void {
+    const visited = new Set<string>();
+    const recursionStack = new Set<string>();
+
+    const visit = (stageId: string): boolean => {
+      if (recursionStack.has(stageId)) return true;
+      if (visited.has(stageId)) return false;
+
+      visited.add(stageId);
+      recursionStack.add(stageId);
+
+      const stage = stages.find(s => s.id === stageId);
+      if (stage?.nextStages) {
+        for (const next of stage.nextStages) {
+          if (visit(next.stageId)) return true;
+        }
+      }
+
+      recursionStack.delete(stageId);
+      return false;
+    };
+
+    for (const stage of stages) {
+      if (!visited.has(stage.id) && visit(stage.id)) {
+        throw new Error(`Circular dependency detected involving stage: ${stage.id}`);
+      }
+    }
   }
 }

@@ -1,5 +1,47 @@
 import { z } from 'zod';
 
+// ============ 项目生命周期状态 ============
+export type ProjectLifecycleStatus = 'draft' | 'in-progress' | 'review' | 'completed';
+
+export const ProjectLifecycleStatusEnum = {
+  DRAFT: 'draft',
+  IN_PROGRESS: 'in-progress',
+  REVIEW: 'review',
+  COMPLETED: 'completed'
+} as const;
+
+// ============ 版本管理 ============
+export interface ProjectVersion {
+  id: string;
+  projectId: string;
+  version: string;
+  name: string;
+  description?: string;
+  createdAt: Date;
+  createdBy?: string;
+  changes: string[];
+  status: 'active' | 'archived' | 'deprecated';
+}
+
+// ============ 模块管理 ============
+export interface ProjectModule {
+  id: string;
+  projectId: string;
+  name: string;
+  description?: string;
+  version: string;
+  status: ProjectLifecycleStatus;
+  dependencies?: string[];
+  roles?: string[];
+  metadata: {
+    createdAt: Date;
+    updatedAt: Date;
+    order: number;
+    tags?: string[];
+  };
+}
+
+// ============ 增强的项目状态 ============
 export type ProjectStatus = 'active' | 'archived' | 'draft';
 
 export type ProjectVisibility = 'private' | 'team' | 'public';
@@ -74,14 +116,19 @@ export interface Project {
   path: string;
   description?: string;
   status: ProjectStatus;
+  lifecycleStatus: ProjectLifecycleStatus; // 新增：生命周期状态
   visibility: ProjectVisibility;
   config: ProjectConfig;
   members?: ProjectMember[];
+  modules?: ProjectModule[]; // 新增：模块列表
+  versions?: ProjectVersion[]; // 新增：版本列表
+  currentVersion?: string; // 新增：当前版本
   metadata: {
     createdAt: Date;
     updatedAt: Date;
     version?: string;
     tags?: string[];
+    owner?: string;
   };
 }
 
@@ -109,20 +156,56 @@ export interface CreateProjectInput {
   description?: string;
   visibility?: ProjectVisibility;
   config?: Partial<ProjectConfig>;
+  modules?: CreateModuleInput[]; // 新增：初始模块
 }
 
 export interface UpdateProjectInput {
   name?: string;
   description?: string;
   status?: ProjectStatus;
+  lifecycleStatus?: ProjectLifecycleStatus; // 新增：生命周期状态
   visibility?: ProjectVisibility;
   config?: Partial<ProjectConfig>;
 }
 
 export interface ProjectFilters {
   status?: ProjectStatus;
+  lifecycleStatus?: ProjectLifecycleStatus; // 新增：生命周期筛选
   visibility?: ProjectVisibility;
   search?: string;
   limit?: number;
   offset?: number;
+}
+
+// ============ 模块操作接口 ============
+export interface CreateModuleInput {
+  name: string;
+  description?: string;
+  version?: string;
+  dependencies?: string[];
+  roles?: string[];
+  tags?: string[];
+}
+
+export interface UpdateModuleInput {
+  name?: string;
+  description?: string;
+  status?: ProjectLifecycleStatus;
+  dependencies?: string[];
+  roles?: string[];
+  tags?: string[];
+}
+
+// ============ 版本操作接口 ============
+export interface CreateVersionInput {
+  version: string;
+  name: string;
+  description?: string;
+  changes: string[];
+}
+
+export interface UpdateVersionInput {
+  name?: string;
+  description?: string;
+  status?: 'active' | 'archived' | 'deprecated';
 }

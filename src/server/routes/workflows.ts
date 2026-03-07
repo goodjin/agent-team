@@ -258,6 +258,65 @@ export function createWorkflowRouter(agent: ProjectAgent): WorkflowRouter {
     }
   });
 
+  // ============ Stage-based Workflow 执行 ============
+  router.post('/:id/execute-stage', async (req: Request, res: Response) => {
+    try {
+      const execution = await getEngine().executeStageWorkflow(
+        req.params.id,
+        req.body.input
+      );
+      res.json({
+        success: true,
+        data: execution
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('not found')) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'NOT_FOUND',
+            message: error.message
+          }
+        });
+      }
+      if (error instanceof Error && error.message.includes('no stages')) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'NO_STAGES',
+            message: error.message
+          }
+        });
+      }
+      res.status(500).json({
+        success: false,
+        error: {
+          code: 'EXECUTION_ERROR',
+          message: error instanceof Error ? error.message : 'Unknown error'
+        }
+      });
+    }
+  });
+
+  // ============ 创建 Stage-based Workflow ============
+  router.post('/stage', async (req: Request, res: Response) => {
+    try {
+      const workflow = await getEngine().createStageWorkflow(req.body);
+      res.status(201).json({
+        success: true,
+        data: workflow
+      });
+    } catch (error) {
+      res.status(400).json({
+        success: false,
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: error instanceof Error ? error.message : 'Unknown error'
+        }
+      });
+    }
+  });
+
   return {
     router,
     getWorkflows: () => getEngine().getAllWorkflows(),

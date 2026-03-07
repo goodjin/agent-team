@@ -1321,8 +1321,28 @@ async function loadProjects() {
             document.getElementById('current-project-name').textContent = current.name;
             document.getElementById('current-project-path').textContent = current.path || '-';
             document.getElementById('current-tasks').textContent = current.taskCount || 0;
-            document.getElementById('current-agents').textContent = current.agentCount || 0;
+            document.getElementById('current-modules').textContent = current.modules?.length || 0;
+            document.getElementById('current-version').textContent = current.currentVersion || 'v1.0.0';
             document.getElementById('current-completion').textContent = current.completionRate || '0%';
+
+            // 更新生命周期状态显示
+            updateLifecycleStatus(current.lifecycleStatus);
+
+            // 显示项目详情区域
+            const detailSection = document.getElementById('project-detail-section');
+            if (detailSection) {
+                detailSection.style.display = 'block';
+            }
+
+            // 加载模块和版本
+            loadProjectModules(current.id);
+            loadProjectVersions(current.id);
+        } else {
+            // 隐藏项目详情区域
+            const detailSection = document.getElementById('project-detail-section');
+            if (detailSection) {
+                detailSection.style.display = 'none';
+            }
         }
 
         renderProjectsGrid(state.projects);
@@ -1333,6 +1353,246 @@ async function loadProjects() {
         showLoading(false);
     }
 }
+
+// 更新生命周期状态显示
+function updateLifecycleStatus(status) {
+    const container = document.getElementById('current-lifecycle-status');
+    if (!container) return;
+
+    const statusMap = {
+        'draft': { label: '草稿', class: 'draft' },
+        'in-progress': { label: '进行中', class: 'in-progress' },
+        'review': { label: '审核中', class: 'review' },
+        'completed': { label: '已完成', class: 'completed' }
+    };
+
+    const statusInfo = statusMap[status] || statusMap.draft;
+    container.innerHTML = `<span class="lifecycle-badge ${statusInfo.class}">${statusInfo.label}</span>`;
+}
+
+// 切换项目详情标签页
+window.switchProjectTab = function(tabName) {
+    const tabContents = document.querySelectorAll('.tab-content');
+    tabContents.forEach(content => content.classList.remove('active'));
+
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(btn => btn.classList.remove('active'));
+
+    document.getElementById(`tab-${tabName}`).classList.add('active');
+    document.querySelector(`[data-tab="${tabName}"]`).classList.add('active');
+};
+
+// 加载项目模块
+async function loadProjectModules(projectId) {
+    try {
+        const data = await apiCall(`/projects/${projectId}/modules`);
+        renderModulesList(data.data || []);
+    } catch (error) {
+        console.error('加载模块失败:', error);
+    }
+}
+
+// 渲染模块列表
+function renderModulesList(modules) {
+    const container = document.getElementById('modules-list');
+    if (!container) return;
+
+    if (modules.length === 0) {
+        container.innerHTML = '<div class="empty-state"><span class="empty-icon">📦</span><p>暂无模块</p></div>';
+        return;
+    }
+
+    container.innerHTML = modules.map(mod => `
+        <div class="module-card" data-module-id="${mod.id}">
+            <div class="module-header">
+                <span class="module-name">${escapeHtml(mod.name)}</span>
+                <span class="module-version">v${mod.version}</span>
+            </div>
+            <div class="module-description">${escapeHtml(mod.description || '暂无描述')}</div>
+            <div class="module-meta">
+                <span class="status-badge status-${mod.status}">${getLifecycleLabel(mod.status)}</span>
+                <span>顺序: ${mod.metadata?.order || 0}</span>
+            </div>
+            <div class="module-actions">
+                <button class="btn btn-sm btn-secondary" onclick="editModule('${mod.id}')">✏️ 编辑</button>
+                <button class="btn btn-sm btn-danger" onclick="deleteModule('${mod.id}')">🗑️ 删除</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// 加载项目版本
+async function loadProjectVersions(projectId) {
+    try {
+        const data = await apiCall(`/projects/${projectId}/versions`);
+        renderVersionsList(data.data || []);
+    } catch (error) {
+        console.error('加载版本失败:', error);
+    }
+}
+
+// 渲染版本列表
+function renderVersionsList(versions) {
+    const container = document.getElementById('versions-list');
+    if (!container) return;
+
+    if (versions.length === 0) {
+        container.innerHTML = '<div class="empty-state"><span class="empty-icon">🏷️</span><p>暂无版本</p></div>';
+        return;
+    }
+
+    container.innerHTML = versions.map(ver => `
+        <div class="version-item ${ver.status === 'active' ? 'active' : ''}" data-version-id="${ver.id}">
+            <div class="version-header">
+                <span class="version-number">v${escapeHtml(ver.version)}</span>
+                <span class="version-badge ${ver.status}">${getVersionStatusLabel(ver.status)}</span>
+            </div>
+            <div class="version-name">${escapeHtml(ver.name)}</div>
+            <div class="version-description">${escapeHtml(ver.description || '')}</div>
+            ${ver.changes && ver.changes.length > 0 ? `
+                <div class="version-changes">
+                    <strong>变更内容:</strong>
+                    <ul>
+                        ${ver.changes.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
+                    </ul>
+                </div>
+            ` : ''}
+            <div class="version-meta">
+                <span>创建时间: ${formatDate(ver.createdAt)}</span>
+            </div>
+        </div>
+    `).join('');
+}
+
+function getLifecycleLabel(status) {
+    const labels = {
+        'draft': '草稿',
+        'in-progress': '进行中',
+        'review': '审核中',
+        'completed': '已完成'
+    };
+    return labels[status] || status;
+}
+
+function getVersionStatusLabel(status) {
+    const labels = {
+        'active': '当前版本',
+        'archived': '已归档',
+        'deprecated': '已废弃'
+    };
+    return labels[status] || status;
+}
+
+// 显示创建模块模态框
+window.showCreateModuleModal = function() {
+    const modal = document.getElementById('modal-create-module');
+    if (modal) {
+        modal.classList.add('active');
+        const form = document.getElementById('form-create-module');
+        form?.reset();
+    }
+};
+
+// 显示创建版本模态框
+window.showCreateVersionModal = function() {
+    const modal = document.getElementById('modal-create-version');
+    if (modal) {
+        modal.classList.add('active');
+        const form = document.getElementById('form-create-version');
+        form?.reset();
+    }
+};
+
+// 创建模块
+document.getElementById('form-create-module')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!state.currentProjectId && state.projects.length > 0) {
+        state.currentProjectId = state.projects[0].id;
+    }
+    if (!state.currentProjectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    try {
+        const data = {
+            name: document.getElementById('module-name').value,
+            description: document.getElementById('module-description').value,
+            version: document.getElementById('module-version').value,
+            roles: Array.from(document.getElementById('module-roles').selectedOptions).map(o => o.value)
+        };
+
+        await apiCall(`/projects/${state.currentProjectId}/modules`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+
+        showToast('模块创建成功', 'success');
+        document.getElementById('modal-create-module')?.classList.remove('active');
+        loadProjectModules(state.currentProjectId);
+        loadProjects();
+    } catch (error) {
+        console.error('创建模块失败:', error);
+        showToast('创建模块失败', 'error');
+    }
+});
+
+// 创建版本
+document.getElementById('form-create-version')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    if (!state.currentProjectId && state.projects.length > 0) {
+        state.currentProjectId = state.projects[0].id;
+    }
+    if (!state.currentProjectId) {
+        showToast('请先选择一个项目', 'warning');
+        return;
+    }
+
+    try {
+        const changesText = document.getElementById('version-changes').value;
+        const changes = changesText.split('\n').filter(c => c.trim());
+
+        const data = {
+            version: document.getElementById('version-number').value,
+            name: document.getElementById('version-name').value,
+            description: document.getElementById('version-description').value,
+            changes
+        };
+
+        await apiCall(`/projects/${state.currentProjectId}/versions`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+
+        showToast('版本创建成功', 'success');
+        document.getElementById('modal-create-version')?.classList.remove('active');
+        loadProjectVersions(state.currentProjectId);
+        loadProjects();
+    } catch (error) {
+        console.error('创建版本失败:', error);
+        showToast('创建版本失败', 'error');
+    }
+});
+
+// 删除模块
+window.deleteModule = async function(moduleId) {
+    if (!confirm('确定要删除这个模块吗？')) return;
+    if (!state.currentProjectId && state.projects.length > 0) {
+        state.currentProjectId = state.projects[0].id;
+    }
+
+    try {
+        await apiCall(`/projects/${state.currentProjectId}/modules/${moduleId}`, {
+            method: 'DELETE'
+        });
+        showToast('模块已删除', 'success');
+        loadProjectModules(state.currentProjectId);
+        loadProjects();
+    } catch (error) {
+        console.error('删除模块失败:', error);
+        showToast('删除模块失败', 'error');
+    }
+};
 
 function renderProjectsGrid(projects) {
     const container = document.getElementById('projects-grid');
@@ -1918,9 +2178,13 @@ window.deleteWorkflow = async function(workflowId) {
 };
 
 // 执行工作流
-window.executeWorkflow = async function(workflowId) {
+window.executeWorkflow = async function(workflowId, mode = 'step') {
     try {
-        await apiCall(`/workflows/${workflowId}/execute`, { method: 'POST' });
+        let endpoint = '/execute';
+        if (mode === 'stage') {
+            endpoint = '/execute-stage';
+        }
+        await apiCall(`/workflows/${workflowId}${endpoint}`, { method: 'POST' });
         showToast('工作流已开始执行', 'success');
         setTimeout(() => {
             loadTasks();
@@ -1929,6 +2193,11 @@ window.executeWorkflow = async function(workflowId) {
     } catch (error) {
         console.error('执行工作流失败:', error);
     }
+};
+
+// 执行Stage工作流
+window.executeStageWorkflow = async function(workflowId) {
+    await window.executeWorkflow(workflowId, 'stage');
 };
 
 // 加载报告
