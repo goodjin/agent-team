@@ -1,6 +1,17 @@
 import { Router, Request, Response } from 'express';
 import { TaskManager } from '../../core/task-manager.js';
 import { AgentMgr } from '../../core/agent-mgr.js';
+import {
+  ensureBaseDirectory,
+  createProjectDirectories,
+  deleteProjectDirectory,
+  loadAllData,
+  saveProject,
+  saveModules,
+  saveVersions,
+  saveTasks,
+  saveStages,
+} from '../../core/project-storage.js';
 import type {
   Project,
   ProjectStatus,
@@ -34,6 +45,61 @@ const projectStore: InMemoryProjectStore = {
   stages: new Map()
 };
 
+// Initialize storage and load data
+let storageInitialized = false;
+
+export async function initializeProjectStore(): Promise<void> {
+  if (storageInitialized) return;
+
+  await ensureBaseDirectory();
+
+  const data = await loadAllData();
+
+  for (const project of data.projects) {
+    projectStore.projects.set(project.id, project);
+  }
+  for (const module of data.modules) {
+    projectStore.modules.set(module.id, module);
+  }
+  for (const version of data.versions) {
+    projectStore.versions.set(version.id, version);
+  }
+  for (const task of data.tasks) {
+    projectStore.tasks.set(task.id, task);
+  }
+  for (const stage of data.stages) {
+    projectStore.stages.set(stage.id, stage);
+  }
+
+  storageInitialized = true;
+  console.log(`[ProjectStorage] Loaded ${data.projects.length} projects, ${data.modules.length} modules`);
+}
+
+// Auto-save helper functions
+async function autoSaveProject(project: Project): Promise<void> {
+  await saveProject(project);
+}
+
+async function autoSaveModules(projectId: string): Promise<void> {
+  const modules = Array.from(projectStore.modules.values()).filter(m => m.projectId === projectId);
+  await saveModules(projectId, modules);
+}
+
+async function autoSaveVersions(projectId: string): Promise<void> {
+  const versions = Array.from(projectStore.versions.values()).filter(v => v.projectId === projectId);
+  await saveVersions(projectId, versions);
+}
+
+async function autoSaveTasks(projectId: string): Promise<void> {
+  const tasks = Array.from(projectStore.tasks.values()).filter(t => t.projectId === projectId);
+  await saveTasks(projectId, tasks);
+}
+
+async function autoSaveStages(projectId: string): Promise<void> {
+  const stages = Array.from(projectStore.stages.values());
+  await saveStages(projectId, stages);
+}
+
 export interface ProjectRouter {
   getProjects(req: Request, res: Response): Promise<void>;
   getProject(req: Request, res: Response): Promise<void>;
@@ -60,6 +126,9 @@ export function createProjectRouter(
   agentMgr: AgentMgr
 ): Router {
   const router = Router();
+
+  // Initialize storage on first router creation
+  initializeProjectStore().catch(console.error);
 
   router.get('/', async (req: Request, res: Response) => {
     try {
@@ -679,13 +748,17 @@ async function createProject(req: Request, _res: Response, input: CreateProjectI
     ? { ...config, projectName: name, projectPath: path }
     : { projectName: name, projectPath: path };
 
+  // 创建项目目录结构
+  await createProjectDirectories(id);
+
   // 创建初始模块
   const createdModules: ProjectModule[] = [];
   if (modules && modules.length > 0) {
     for (let i = 0; i < modules.length; i++) {
       const mod = modules[i];
-      createdModules.push({
-        id: `mod-${Date.now()}-${i}`,
+      const moduleId = `mod-${Date.now()}-${i}-${Math.random().toString(36).substr(2, 6)}`;
+      const projectModule: ProjectModule = {
+        id: moduleId,
         projectId: id,
         name: mod.name || 'Unnamed Module',
         description: mod.description,
@@ -699,7 +772,9 @@ async function createProject(req: Request, _res: Response, input: CreateProjectI
           order: i,
           tags: mod.tags
         }
-      });
+      };
+      createdModules.push(projectModule);
+      projectStore.modules.set(moduleId, projectModule);
     }
   }
 
@@ -724,10 +799,9 @@ async function createProject(req: Request, _res: Response, input: CreateProjectI
 
   projectStore.projects.set(id, project);
 
-  // 保存模块到store
-  for (const mod of createdModules) {
-    projectStore.modules.set(mod.id, mod);
-  }
+  // 持久化保存
+  await autoSaveProject(project);
+  await autoSaveModules(id);
 
   return project;
 }
@@ -759,6 +833,10 @@ async function updateProject(req: Request, _res: Response, input: UpdateProjectI
   };
 
   projectStore.projects.set(id, updated);
+
+  // Auto-save to disk
+  await autoSaveProject(updated);
+
   return updated;
 }
 
@@ -780,6 +858,10 @@ async function updateProjectStatus(req: Request, _res: Response, status: Project
   };
 
   projectStore.projects.set(id, updated);
+
+  // Auto-save to disk
+  await autoSaveProject(updated);
+
   return updated;
 }
 
@@ -790,7 +872,28 @@ async function deleteProject(req: Request, _res: Response): Promise<{ success: b
     return { success: false, message: 'Project not found' };
   }
 
+  // Delete from in-memory store
   projectStore.projects.delete(id);
+
+  // Delete associated data from store
+  const modulesToDelete = Array.from(projectStore.modules.values()).filter(m => m.projectId === id);
+  for (const mod of modulesToDelete) {
+    projectStore.modules.delete(mod.id);
+  }
+
+  const versionsToDelete = Array.from(projectStore.versions.values()).filter(v => v.projectId === id);
+  for (const ver of versionsToDelete) {
+    projectStore.versions.delete(ver.id);
+  }
+
+  const tasksToDelete = Array.from(projectStore.tasks.values()).filter(t => t.projectId === id);
+  for (const task of tasksToDelete) {
+    projectStore.tasks.delete(task.id);
+  }
+
+  // Delete from disk
+  await deleteProjectDirectory(id);
+
   return { success: true, message: `Project ${id} deleted successfully` };
 }
 
@@ -875,6 +978,10 @@ async function createModule(req: Request, _res: Response): Promise<ProjectModule
     projectStore.projects.set(projectId, project);
   }
 
+  // Auto-save
+  await autoSaveModules(projectId);
+  await autoSaveProject(project!);
+
   return module;
 }
 
@@ -902,6 +1009,10 @@ async function updateModule(req: Request, _res: Response): Promise<ProjectModule
   };
 
   projectStore.modules.set(moduleId, updated);
+
+  // Auto-save
+  await autoSaveModules(projectId);
+
   return updated;
 }
 
@@ -921,6 +1032,10 @@ async function deleteModule(req: Request, _res: Response): Promise<{ success: bo
     project.modules = (project.modules || []).filter(m => m.id !== moduleId);
     projectStore.projects.set(projectId, project);
   }
+
+  // Auto-save
+  await autoSaveModules(projectId);
+  await autoSaveProject(project!);
 
   return { success: true, message: `Module ${moduleId} deleted successfully` };
 }
@@ -960,6 +1075,10 @@ async function createVersion(req: Request, _res: Response): Promise<ProjectVersi
     projectStore.projects.set(projectId, project);
   }
 
+  // Auto-save
+  await autoSaveVersions(projectId);
+  await autoSaveProject(project!);
+
   return version;
 }
 
@@ -980,6 +1099,10 @@ async function updateVersion(req: Request, _res: Response): Promise<ProjectVersi
   };
 
   projectStore.versions.set(versionId, updated);
+
+  // Auto-save
+  await autoSaveVersions(projectId);
+
   return updated;
 }
 
@@ -999,6 +1122,10 @@ async function deleteVersion(req: Request, _res: Response): Promise<{ success: b
     project.versions = (project.versions || []).filter(v => v.id !== versionId);
     projectStore.projects.set(projectId, project);
   }
+
+  // Auto-save
+  await autoSaveVersions(projectId);
+  await autoSaveProject(project!);
 
   return { success: true, message: `Version ${versionId} deleted successfully` };
 }
@@ -1025,6 +1152,10 @@ async function updateProjectLifecycleStatus(
   };
 
   projectStore.projects.set(id, updated);
+
+  // Auto-save
+  await autoSaveProject(updated);
+
   return updated;
 }
 
@@ -1069,6 +1200,10 @@ async function createModuleTask(req: Request, _res: Response): Promise<ProjectTa
     projectStore.modules.set(moduleId, module);
   }
 
+  // Auto-save
+  await autoSaveTasks(projectId);
+  await autoSaveModules(projectId);
+
   return task;
 }
 
@@ -1096,6 +1231,10 @@ async function updateModuleTask(req: Request, _res: Response): Promise<ProjectTa
   };
 
   projectStore.tasks.set(taskId, updated);
+
+  // Auto-save
+  await autoSaveTasks(projectId);
+
   return updated;
 }
 
@@ -1122,6 +1261,11 @@ async function deleteModuleTask(req: Request, _res: Response): Promise<{ success
     module.tasks = (module.tasks || []).filter(t => t.id !== taskId);
     projectStore.modules.set(moduleId, module);
   }
+
+  // Auto-save
+  await autoSaveTasks(projectId);
+  await autoSaveStages(projectId);
+  await autoSaveModules(projectId);
 
   return { success: true, message: `Task ${taskId} deleted successfully` };
 }
@@ -1172,6 +1316,10 @@ async function createTaskStage(req: Request, _res: Response): Promise<TaskStage>
   };
 
   projectStore.stages.set(stage.id, stage);
+
+  // Auto-save
+  await autoSaveStages(projectId);
+
   return stage;
 }
 
@@ -1208,5 +1356,9 @@ async function updateTaskStage(req: Request, _res: Response): Promise<TaskStage 
   }
 
   projectStore.stages.set(stageId, updated);
+
+  // Auto-save
+  await autoSaveStages(projectId);
+
   return updated;
 }
