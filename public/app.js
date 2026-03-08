@@ -179,9 +179,20 @@ function initNavigation() {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const page = item.dataset.page;
+            window.location.hash = page;
             switchPage(page);
         });
     });
+    
+    // 监听 hash 变化（支持浏览器前进/后退）
+    window.addEventListener('hashchange', () => {
+        const hash = window.location.hash.replace('#', '') || 'dashboard';
+        switchPage(hash);
+    });
+    
+    // 初始化时根据 hash 加载页面
+    const initialHash = window.location.hash.replace('#', '') || 'dashboard';
+    switchPage(initialHash);
     
     // 刷新任务按钮
     document.getElementById('btn-refresh-tasks')?.addEventListener('click', () => {
@@ -341,20 +352,152 @@ function updateHierarchyBreadcrumb() {
 
 // 加载模块列表
 async function loadModules(projectId) {
-    // TODO: 实现从 API 加载模块
-    console.log('Loading modules for project:', projectId);
+    try {
+        const data = await apiCall(`/projects/${projectId}/modules`);
+        const modules = data.data || [];
+        renderModulesList(modules);
+    } catch (error) {
+        console.error('加载模块失败:', error);
+        showToast('加载模块失败', 'error');
+    }
+}
+
+// 渲染模块列表
+function renderModulesList(modules) {
+    const container = document.getElementById('modules-list');
+    if (!container) return;
+    
+    if (modules.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <span class="empty-icon">📦</span>
+                <p>暂无模块</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = modules.map(module => `
+        <div class="module-card" onclick="selectModule('${module.id}', '${escapeHtml(module.name)}')">
+            <div class="module-icon">📦</div>
+            <div class="module-name">${escapeHtml(module.name)}</div>
+            <div class="module-desc">${escapeHtml(module.description || '无描述')}</div>
+            <div class="module-stats">
+                <span>${module.tasks?.length || 0} 任务</span>
+                <span>v${module.version || '1.0.0'}</span>
+            </div>
+        </div>
+    `).join('');
 }
 
 // 加载任务列表
 async function loadTasks(moduleId) {
-    // TODO: 实现从 API 加载任务
-    console.log('Loading tasks for module:', moduleId);
+    try {
+        // 从所有任务中筛选当前模块的任务
+        const data = await apiCall('/tasks');
+        const allTasks = data.data || [];
+        const moduleTasks = allTasks.filter(t => t.moduleId === moduleId);
+        renderTasksList(moduleTasks);
+    } catch (error) {
+        console.error('加载任务失败:', error);
+        showToast('加载任务失败', 'error');
+    }
+}
+
+// 渲染任务列表
+function renderTasksList(tasks) {
+    const container = document.getElementById('tasks-list');
+    if (!container) return;
+    
+    if (tasks.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <span class="empty-icon">📋</span>
+                <p>暂无任务</p>
+            </div>
+        `;
+        return;
+    }
+    
+    const statusLabels = {
+        'draft': '草稿',
+        'in-progress': '进行中',
+        'review': '审核中',
+        'completed': '已完成',
+        'pending': '待处理',
+        'failed': '失败'
+    };
+    
+    const priorityLabels = {
+        'low': '低',
+        'medium': '中',
+        'high': '高',
+        'critical': '紧急'
+    };
+    
+    container.innerHTML = tasks.map(task => {
+        const status = task.status || 'pending';
+        const priority = task.priority || 'medium';
+        return `
+            <div class="task-list-item" onclick="selectTask('${task.id}', '${escapeHtml(task.title)}')">
+                <div class="task-info">
+                    <div class="task-icon">📋</div>
+                    <div>
+                        <div class="task-title">${escapeHtml(task.title)}</div>
+                        <div class="task-meta">${priorityLabels[priority]} · ${task.description?.substring(0, 30) || ''}</div>
+                    </div>
+                </div>
+                <span class="task-status" style="background: var(--bg-secondary); color: var(--text-secondary)">${statusLabels[status] || status}</span>
+            </div>
+        `;
+    }).join('');
 }
 
 // 加载任务流程
 async function loadTaskFlow(taskId) {
-    // TODO: 实现从 API 加载流程/阶段
-    console.log('Loading flow for task:', taskId);
+    try {
+        // 简化：显示任务阶段信息
+        const data = await apiCall(`/tasks/${taskId}`);
+        const task = data.data || data.task;
+        renderTaskFlow(task);
+    } catch (error) {
+        console.error('加载流程失败:', error);
+        // 如果没有阶段数据，显示空状态
+        renderTaskFlow(null);
+    }
+}
+
+// 渲染任务流程
+function renderTaskFlow(task) {
+    const container = document.getElementById('flow-stages');
+    if (!container) return;
+    
+    const stages = task?.stages || [];
+    
+    if (stages.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <span class="empty-icon">🔄</span>
+                <p>暂无流程阶段，点击添加</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = stages.map((stage, index) => `
+        <div class="flow-stage">
+            <div class="stage-number">${index + 1}</div>
+            <div class="stage-content">
+                <div class="stage-header">
+                    <span class="stage-title">${escapeHtml(stage.name)}</span>
+                    <div class="stage-roles">
+                        ${(stage.roles || []).map(role => `<span class="stage-role-tag">${role}</span>`).join('')}
+                    </div>
+                </div>
+                <div class="stage-description">${escapeHtml(stage.description || '')}</div>
+            </div>
+        </div>
+    `).join('');
 }
 
 // 更新面包屑
@@ -1418,42 +1561,78 @@ async function loadProjects() {
         const data = await apiCall('/projects');
         state.projects = data.data || [];
 
+        // 渲染项目网格
+        renderProjectsGrid(state.projects);
+        
+        // 如果有项目，自动选择第一个
         if (state.projects.length > 0) {
-            const current = state.projects[0];
-            document.getElementById('current-project-name').textContent = current.name;
-            document.getElementById('current-project-path').textContent = current.path || '-';
-            document.getElementById('current-tasks').textContent = current.taskCount || 0;
-            document.getElementById('current-modules').textContent = current.modules?.length || 0;
-            document.getElementById('current-version').textContent = current.currentVersion || 'v1.0.0';
-            document.getElementById('current-completion').textContent = current.completionRate || '0%';
-
-            // 更新生命周期状态显示
-            updateLifecycleStatus(current.lifecycleStatus);
-
-            // 显示项目详情区域
-            const detailSection = document.getElementById('project-detail-section');
-            if (detailSection) {
-                detailSection.style.display = 'block';
-            }
-
-            // 加载模块和版本
-            loadProjectModules(current.id);
-            loadProjectVersions(current.id);
-        } else {
-            // 隐藏项目详情区域
-            const detailSection = document.getElementById('project-detail-section');
-            if (detailSection) {
-                detailSection.style.display = 'none';
+            const firstProject = state.projects[0];
+            // 更新面包屑显示项目名称
+            const projectNameEl = document.getElementById('breadcrumb-project-name');
+            if (projectNameEl) {
+                projectNameEl.textContent = firstProject.name;
             }
         }
-
-        renderProjectsGrid(state.projects);
+        
         showLoading(false);
     } catch (error) {
         console.error('加载项目失败:', error);
         showToast('加载项目失败', 'error');
         showLoading(false);
     }
+}
+
+// 渲染项目网格
+function renderProjectsGrid(projects) {
+    const container = document.getElementById('projects-grid');
+    if (!container) return;
+    
+    if (projects.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <span class="empty-icon">📁</span>
+                <p>暂无项目，点击上方创建</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = projects.map(project => {
+        const lifecycleLabels = {
+            'draft': '草稿',
+            'in-progress': '进行中',
+            'review': '审核中',
+            'completed': '已完成'
+        };
+        const lifecycle = project.lifecycleStatus || project.lifecycle || 'draft';
+        const label = lifecycleLabels[lifecycle] || '草稿';
+        
+        return `
+            <div class="project-card" onclick="selectProject('${project.id}', '${escapeHtml(project.name)}')">
+                <div class="project-info">
+                    <div class="project-name">${escapeHtml(project.name)}</div>
+                    <div class="project-path">${escapeHtml(project.path || '-')}</div>
+                    <div class="lifecycle-status">
+                        <span class="lifecycle-badge ${lifecycle}">${label}</span>
+                    </div>
+                </div>
+                <div class="project-stats">
+                    <div class="project-stat">
+                        <span class="ps-value">${project.modules?.length || 0}</span>
+                        <span class="ps-label">模块</span>
+                    </div>
+                    <div class="project-stat">
+                        <span class="ps-value">${project.taskCount || 0}</span>
+                        <span class="ps-label">任务</span>
+                    </div>
+                    <div class="project-stat">
+                        <span class="ps-value">${project.currentVersion || 'v1.0.0'}</span>
+                        <span class="ps-label">版本</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }).join('');
 }
 
 // 更新生命周期状态显示

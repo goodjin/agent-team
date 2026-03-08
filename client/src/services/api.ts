@@ -13,7 +13,16 @@ async function fetchApi<T>(endpoint: string, options?: RequestInit): Promise<T> 
     throw new Error(`API Error: ${response.status} ${response.statusText}`);
   }
 
-  return response.json();
+  const json = await response.json();
+  
+  // 后端返回 { success, data, ... } 格式
+  // 如果有错误，抛出异常
+  if (!json.success) {
+    throw new Error(json.error?.message || json.error || 'API request failed');
+  }
+  
+  // 返回 data 部分
+  return json.data;
 }
 
 // Tasks API
@@ -64,12 +73,14 @@ export const projectsApi = {
     body: JSON.stringify(data),
   }),
   update: (id: string, data: any) => fetchApi<{ project: any }>(`/projects/${id}`, {
-    method: 'PATCH',
+    method: 'PUT',
     body: JSON.stringify(data),
   }),
   delete: (id: string) => fetchApi<{ success: boolean }>(`/projects/${id}`, {
     method: 'DELETE',
   }),
+  getModules: (projectId: string) => fetchApi<{ modules: any[] }>(`/projects/${projectId}/modules`),
+  getStats: (projectId: string) => fetchApi<{ stats: any }>(`/projects/${projectId}/stats`),
 };
 
 // Roles API

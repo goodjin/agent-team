@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { projectsApi } from '../services/api';
 import type { Project } from '../types';
 import './Pages.css';
@@ -6,7 +7,9 @@ import './Pages.css';
 export function Projects() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [showModal, setShowModal] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     loadProjects();
@@ -14,10 +17,16 @@ export function Projects() {
 
   const loadProjects = async () => {
     try {
+      setLoading(true);
+      setError(null);
       const res = await projectsApi.getAll();
-      setProjects(res.projects || []);
-    } catch (error) {
-      console.error('Failed to load projects:', error);
+      // fetchApi 已经解包了 data 部分，所以直接使用
+      // 后端返回 { success, data: [...], total }
+      // fetchApi 返回的是 data 部分，即项目数组
+      setProjects(res?.projects || res || []);
+    } catch (err: any) {
+      console.error('Failed to load projects:', err);
+      setError(err.message || '加载项目失败');
     } finally {
       setLoading(false);
     }
@@ -37,9 +46,15 @@ export function Projects() {
       await projectsApi.create(projectData);
       setShowModal(false);
       loadProjects();
-    } catch (error) {
-      console.error('Failed to create project:', error);
+    } catch (err: any) {
+      console.error('Failed to create project:', err);
+      setError(err.message || '创建项目失败');
     }
+  };
+
+  const handleProjectClick = (project: Project) => {
+    // 进入模块视图 - 导航到项目详情页
+    navigate(`/projects/${project.id}`);
   };
 
   const getLifecycleBadge = (lifecycle: string) => {
@@ -50,6 +65,11 @@ export function Projects() {
       completed: '已完成',
     };
     return badges[lifecycle] || lifecycle;
+  };
+
+  // 兼容不同的字段名：lifecycle 或 lifecycleStatus
+  const getProjectLifecycle = (project: Project) => {
+    return project.lifecycle || (project as any).lifecycleStatus || 'draft';
   };
 
   if (loading) {
@@ -68,6 +88,13 @@ export function Projects() {
         </button>
       </div>
 
+      {error && (
+        <div className="toast toast-error">
+          {error}
+          <button onClick={() => setError(null)}>&times;</button>
+        </div>
+      )}
+
       {projects.length === 0 ? (
         <div className="empty-state">
           <span className="empty-icon">📁</span>
@@ -79,31 +106,36 @@ export function Projects() {
       ) : (
         <div className="projects-grid">
           {projects.map(project => (
-            <div key={project.id} className="project-card">
+            <div 
+              key={project.id} 
+              className="project-card"
+              onClick={() => handleProjectClick(project)}
+              style={{ cursor: 'pointer' }}
+            >
               <div className="project-info">
                 <div className="project-name">{project.name}</div>
                 <div className="project-path">{project.path}</div>
                 <div className="lifecycle-status">
-                  <span className={`lifecycle-badge ${project.lifecycle}`}>
-                    {getLifecycleBadge(project.lifecycle)}
+                  <span className={`lifecycle-badge ${getProjectLifecycle(project)}`}>
+                    {getLifecycleBadge(getProjectLifecycle(project))}
                   </span>
                 </div>
               </div>
               <div className="project-stats">
                 <div className="project-stat">
-                  <span className="ps-value">{project.tasks}</span>
+                  <span className="ps-value">{project.tasks || 0}</span>
                   <span className="ps-label">任务</span>
                 </div>
                 <div className="project-stat">
-                  <span className="ps-value">{project.modules}</span>
+                  <span className="ps-value">{project.modules || 0}</span>
                   <span className="ps-label">模块</span>
                 </div>
                 <div className="project-stat">
-                  <span className="ps-value">{project.version}</span>
+                  <span className="ps-value">{project.version || 'v0.0.1'}</span>
                   <span className="ps-label">版本</span>
                 </div>
                 <div className="project-stat">
-                  <span className="ps-value">{project.completion}%</span>
+                  <span className="ps-value">{project.completion || 0}%</span>
                   <span className="ps-label">完成度</span>
                 </div>
               </div>

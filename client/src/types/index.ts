@@ -36,6 +36,7 @@ export interface Project {
   path: string;
   description?: string;
   lifecycle: 'draft' | 'in-progress' | 'review' | 'completed';
+  lifecycleStatus?: 'draft' | 'in-progress' | 'review' | 'completed'; // 后端返回的字段名
   visibility: 'private' | 'team' | 'public';
   tasks: number;
   modules: number;
