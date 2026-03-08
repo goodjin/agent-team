@@ -220,20 +220,11 @@ function switchPage(page) {
         case 'dashboard':
             loadDashboard();
             break;
-        case 'tasks':
-            loadTasks();
-            break;
-        case 'agents':
-            loadAgents();
-            break;
         case 'projects':
             loadProjects();
             break;
-        case 'workflows':
-            loadWorkflows();
-            break;
-        case 'reports':
-            loadReports();
+        case 'agents':
+            loadAgents();
             break;
         case 'settings':
             loadSettings();
@@ -250,17 +241,128 @@ window.switchToPage = function(page, filter) {
     }
 };
 
+// 当前层级状态
+let currentHierarchy = {
+    projectId: null,
+    moduleId: null,
+    taskId: null
+};
+
+// 全局函数：层级导航
+window.navigateHierarchy = function(level) {
+    switch (level) {
+        case 'projects':
+            // 返回项目列表
+            currentHierarchy = { projectId: null, moduleId: null, taskId: null };
+            showHierarchyView('projects');
+            break;
+        case 'project':
+            // 返回项目视图
+            currentHierarchy.moduleId = null;
+            currentHierarchy.taskId = null;
+            showHierarchyView('modules');
+            break;
+        case 'module':
+            // 返回模块视图
+            currentHierarchy.taskId = null;
+            showHierarchyView('tasks');
+            break;
+        case 'task':
+            // 返回任务视图
+            showHierarchyView('flow');
+            break;
+    }
+    updateHierarchyBreadcrumb();
+};
+
+// 显示对应层级视图
+function showHierarchyView(view) {
+    document.getElementById('view-projects').style.display = view === 'projects' ? 'block' : 'none';
+    document.getElementById('view-modules').style.display = view === 'modules' ? 'block' : 'none';
+    document.getElementById('view-tasks').style.display = view === 'tasks' ? 'block' : 'none';
+    document.getElementById('view-flow').style.display = view === 'flow' ? 'block' : 'none';
+}
+
+// 选择项目
+window.selectProject = function(projectId, projectName) {
+    currentHierarchy.projectId = projectId;
+    currentHierarchy.moduleId = null;
+    currentHierarchy.taskId = null;
+    document.getElementById('breadcrumb-project-name').textContent = projectName;
+    document.getElementById('breadcrumb-project').style.display = 'inline';
+    document.getElementById('sep-module').style.display = 'none';
+    document.getElementById('breadcrumb-module').style.display = 'none';
+    document.getElementById('sep-task').style.display = 'none';
+    document.getElementById('breadcrumb-task').style.display = 'none';
+    showHierarchyView('modules');
+    loadModules(projectId);
+};
+
+// 选择模块
+window.selectModule = function(moduleId, moduleName) {
+    currentHierarchy.moduleId = moduleId;
+    currentHierarchy.taskId = null;
+    document.getElementById('breadcrumb-module-name').textContent = moduleName;
+    document.getElementById('breadcrumb-module').style.display = 'inline';
+    document.getElementById('sep-module').style.display = 'inline';
+    document.getElementById('sep-task').style.display = 'none';
+    document.getElementById('breadcrumb-task').style.display = 'none';
+    showHierarchyView('tasks');
+    loadTasks(moduleId);
+};
+
+// 选择任务
+window.selectTask = function(taskId, taskName) {
+    currentHierarchy.taskId = taskId;
+    document.getElementById('breadcrumb-task-name').textContent = taskName;
+    document.getElementById('breadcrumb-task').style.display = 'inline';
+    document.getElementById('sep-task').style.display = 'inline';
+    showHierarchyView('flow');
+    loadTaskFlow(taskId);
+};
+
+// 更新面包屑导航
+function updateHierarchyBreadcrumb() {
+    const items = document.querySelectorAll('.hierarchy-breadcrumb .breadcrumb-item');
+    items.forEach(item => {
+        const itemLevel = item.dataset.level;
+        item.classList.remove('active');
+        if (itemLevel === 'projects' && !currentHierarchy.projectId) {
+            item.classList.add('active');
+        } else if (itemLevel === 'project' && currentHierarchy.projectId && !currentHierarchy.moduleId) {
+            item.classList.add('active');
+        } else if (itemLevel === 'module' && currentHierarchy.moduleId && !currentHierarchy.taskId) {
+            item.classList.add('active');
+        } else if (itemLevel === 'task' && currentHierarchy.taskId) {
+            item.classList.add('active');
+        }
+    });
+}
+
+// 加载模块列表
+async function loadModules(projectId) {
+    // TODO: 实现从 API 加载模块
+    console.log('Loading modules for project:', projectId);
+}
+
+// 加载任务列表
+async function loadTasks(moduleId) {
+    // TODO: 实现从 API 加载任务
+    console.log('Loading tasks for module:', moduleId);
+}
+
+// 加载任务流程
+async function loadTaskFlow(taskId) {
+    // TODO: 实现从 API 加载流程/阶段
+    console.log('Loading flow for task:', taskId);
+}
+
 // 更新面包屑
 function updateBreadcrumb(page) {
     const breadcrumbMap = {
         'dashboard': ['首页', '仪表板'],
-        'tasks': ['首页', '任务中心'],
-        'task-detail': ['首页', '任务中心', '任务详情'],
-        'agents': ['首页', '智能体管理'],
-        'agent-detail': ['首页', '智能体管理', '智能体详情'],
-        'projects': ['首页', '项目管理'],
-        'workflows': ['首页', '工作流'],
-        'reports': ['首页', '分析报告'],
+        'projects': ['首页', '项目'],
+        'agents': ['首页', '智能体'],
         'settings': ['首页', '系统设置']
     };
     
@@ -2309,8 +2411,8 @@ function startAutoRefresh() {
             case 'dashboard':
                 loadDashboard();
                 break;
-            case 'tasks':
-                loadTasks();
+            case 'projects':
+                loadProjects();
                 break;
             case 'agents':
                 loadAgents();

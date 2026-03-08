@@ -52,29 +52,17 @@
                     <span class="icon">📊</span>
                     <span>仪表板</span>
                 </a>
-                <a href="#tasks" class="nav-item" data-page="tasks">
-                    <span class="icon">📋</span>
-                    <span>任务中心</span>
+                <a href="#projects" class="nav-item" data-page="projects">
+                    <span class="icon">📁</span>
+                    <span>项目</span>
                 </a>
                 <a href="#agents" class="nav-item" data-page="agents">
                     <span class="icon">🤖</span>
                     <span>智能体</span>
                 </a>
-                <a href="#projects" class="nav-item" data-page="projects">
-                    <span class="icon">📁</span>
-                    <span>项目管理</span>
-                </a>
-                <a href="#workflows" class="nav-item" data-page="workflows">
-                    <span class="icon">🔄</span>
-                    <span>工作流</span>
-                </a>
-                <a href="#reports" class="nav-item" data-page="reports">
-                    <span class="icon">📈</span>
-                    <span>分析报告</span>
-                </a>
                 <a href="#settings" class="nav-item" data-page="settings">
                     <span class="icon">⚙️</span>
-                    <span>系统设置</span>
+                    <span>设置</span>
                 </a>
             </nav>
             
@@ -525,104 +513,96 @@
                 </div>
             </div>
 
-            <!-- 项目管理页面 -->
+            <!-- 项目管理页面 - 层级视图 -->
             <div id="page-projects" class="page">
                 <div class="page-header">
                     <div>
-                        <h2>📁 项目管理</h2>
-                        <p class="subtitle">多项目隔离管理 - 支持模块化开发和版本控制</p>
+                        <h2>📁 项目</h2>
+                        <p class="subtitle">项目 → 模块 → 任务 → 流程</p>
                     </div>
                     <button class="btn btn-primary" onclick="showCreateProjectModal()">
                         ➕ 创建项目
                     </button>
                 </div>
 
-                <!-- 筛选器 -->
-                <div class="filters-bar">
-                    <select id="filter-lifecycle" class="filter-select">
-                        <option value="">所有状态</option>
-                        <option value="draft">草稿</option>
-                        <option value="in-progress">进行中</option>
-                        <option value="review">审核中</option>
-                        <option value="completed">已完成</option>
-                    </select>
+                <!-- 层级导航面包屑 -->
+                <div class="hierarchy-breadcrumb" id="hierarchy-breadcrumb">
+                    <span class="breadcrumb-item active" data-level="projects" onclick="navigateHierarchy('projects')">
+                        <span class="icon">📁</span> 所有项目
+                    </span>
+                    <span class="breadcrumb-separator">›</span>
+                    <span class="breadcrumb-item" data-level="project" id="breadcrumb-project" onclick="navigateHierarchy('project')" style="display: none;">
+                        <span class="icon">📦</span> <span id="breadcrumb-project-name">-</span>
+                    </span>
+                    <span class="breadcrumb-separator" id="sep-module" style="display: none;">›</span>
+                    <span class="breadcrumb-item" data-level="module" id="breadcrumb-module" onclick="navigateHierarchy('module')" style="display: none;">
+                        <span class="icon">📋</span> <span id="breadcrumb-module-name">-</span>
+                    </span>
+                    <span class="breadcrumb-separator" id="sep-task" style="display: none;">›</span>
+                    <span class="breadcrumb-item" data-level="task" id="breadcrumb-task" onclick="navigateHierarchy('task')" style="display: none;">
+                        <span class="icon">🔧</span> <span id="breadcrumb-task-name">-</span>
+                    </span>
                 </div>
 
-                <!-- 当前项目 -->
-                <div class="current-project-section">
-                    <h3>当前项目</h3>
-                    <div class="project-card active" id="current-project-card">
-                        <div class="project-info">
-                            <div class="project-name" id="current-project-name">加载中...</div>
-                            <div class="project-path" id="current-project-path">-</div>
-                            <div class="lifecycle-status" id="current-lifecycle-status">
-                                <span class="lifecycle-badge draft">草稿</span>
-                            </div>
-                        </div>
-                        <div class="project-stats">
-                            <div class="project-stat">
-                                <span class="ps-value" id="current-tasks">0</span>
-                                <span class="ps-label">任务</span>
-                            </div>
-                            <div class="project-stat">
-                                <span class="ps-value" id="current-modules">0</span>
-                                <span class="ps-label">模块</span>
-                            </div>
-                            <div class="project-stat">
-                                <span class="ps-value" id="current-version">v1.0.0</span>
-                                <span class="ps-label">版本</span>
-                            </div>
-                            <div class="project-stat">
-                                <span class="ps-value" id="current-completion">0%</span>
-                                <span class="ps-label">完成度</span>
-                            </div>
-                        </div>
+                <!-- 项目列表视图 -->
+                <div id="view-projects" class="hierarchy-view">
+                    <div class="filters-bar">
+                        <select id="filter-lifecycle" class="filter-select">
+                            <option value="">所有状态</option>
+                            <option value="draft">草稿</option>
+                            <option value="in-progress">进行中</option>
+                            <option value="review">审核中</option>
+                            <option value="completed">已完成</option>
+                        </select>
                     </div>
-                </div>
-
-                <!-- 模块和版本管理 -->
-                <div class="project-detail-section" id="project-detail-section" style="display: none;">
-                    <div class="detail-tabs">
-                        <button class="tab-btn active" data-tab="modules" onclick="switchProjectTab('modules')">📦 模块管理</button>
-                        <button class="tab-btn" data-tab="versions" onclick="switchProjectTab('versions')">🏷️ 版本管理</button>
-                    </div>
-
-                    <!-- 模块管理 -->
-                    <div class="tab-content active" id="tab-modules">
-                        <div class="section-header">
-                            <h4>项目模块</h4>
-                            <button class="btn btn-sm btn-secondary" onclick="showCreateModuleModal()">➕ 添加模块</button>
-                        </div>
-                        <div id="modules-list" class="modules-grid">
-                            <div class="empty-state">
-                                <span class="empty-icon">📦</span>
-                                <p>暂无模块</p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- 版本管理 -->
-                    <div class="tab-content" id="tab-versions">
-                        <div class="section-header">
-                            <h4>版本历史</h4>
-                            <button class="btn btn-sm btn-secondary" onclick="showCreateVersionModal()">➕ 创建版本</button>
-                        </div>
-                        <div id="versions-list" class="versions-timeline">
-                            <div class="empty-state">
-                                <span class="empty-icon">🏷️</span>
-                                <p>暂无版本</p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 项目列表 -->
-                <div class="projects-list-section">
-                    <h3>所有项目</h3>
                     <div class="projects-grid" id="projects-grid">
                         <div class="empty-state">
                             <span class="empty-icon">📁</span>
-                            <p>暂无其他项目</p>
+                            <p>暂无项目，点击上方创建</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模块列表视图 -->
+                <div id="view-modules" class="hierarchy-view" style="display: none;">
+                    <div class="section-header">
+                        <h3>📦 模块列表</h3>
+                        <button class="btn btn-sm btn-secondary" onclick="showCreateModuleModal()">➕ 添加模块</button>
+                    </div>
+                    <div id="modules-list" class="modules-grid">
+                        <div class="empty-state">
+                            <span class="empty-icon">📦</span>
+                            <p>暂无模块</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 任务列表视图 -->
+                <div id="view-tasks" class="hierarchy-view" style="display: none;">
+                    <div class="section-header">
+                        <h3>📋 任务列表</h3>
+                        <button class="btn btn-sm btn-secondary" onclick="showCreateTaskModal()">➕ 添加任务</button>
+                    </div>
+                    <div id="tasks-list" class="tasks-list-view">
+                        <div class="empty-state">
+                            <span class="empty-icon">📋</span>
+                            <p>暂无任务</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 流程/阶段视图 -->
+                <div id="view-flow" class="hierarchy-view" style="display: none;">
+                    <div class="section-header">
+                        <h3>🔄 流程设计</h3>
+                        <button class="btn btn-sm btn-secondary" onclick="showCreateStageModal()">➕ 添加阶段</button>
+                    </div>
+                    <div class="flow-design-container">
+                        <div class="flow-stages" id="flow-stages">
+                            <div class="empty-state">
+                                <span class="empty-icon">🔄</span>
+                                <p>暂无流程阶段，点击添加</p>
+                            </div>
                         </div>
                     </div>
                 </div>
