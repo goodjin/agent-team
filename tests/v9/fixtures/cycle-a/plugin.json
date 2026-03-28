@@ -1,0 +1,9 @@
+{
+  "name": "cycle-a",
+  "version": "1.0.0",
+  "type": "hook",
+  "description": "cycle a",
+  "entry": "index.js",
+  "dependencies": ["cycle-b"],
+  "hook": { "events": ["x"] }
+}

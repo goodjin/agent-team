@@ -19,6 +19,8 @@ export interface QueryOptions {
   type?: LogEntry['type'];
   order?: 'asc' | 'desc';
   limit?: number;
+  /** 仅返回该 Agent 相关日志（与 LogEntry.agentId 匹配） */
+  agentId?: string;
 }
 
 export interface ILogger {
@@ -96,6 +98,7 @@ export class BatchLogger implements ILogger {
           if (options.endTime && new Date(entry.timestamp) > options.endTime) continue;
           if (options.level && entry.level !== options.level) continue;
           if (options.type && entry.type !== options.type) continue;
+          if (options.agentId && entry.agentId !== options.agentId) continue;
 
           entries.push(entry);
         } catch {

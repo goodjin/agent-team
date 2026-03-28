@@ -1,5 +1,7 @@
 export type AgentStatus = 'idle' | 'running' | 'completed' | 'failed';
 
+export type AgentKind = 'master' | 'worker';
+
 export interface AgentContext {
   systemPrompt: string;
   history: Array<{ role: 'user' | 'assistant'; content: string }>;
@@ -10,6 +12,12 @@ export interface Agent {
   id: string;
   taskId: string;
   roleId: string;
+  /** v10：主控会话 vs 工人；缺省按 worker 处理 */
+  kind?: AgentKind;
+  /** v10：工人展示名（主 Agent 无则可为空） */
+  displayName?: string;
+  /** v10：所属主 Agent id（工人必填，主控与旧数据可空） */
+  masterAgentId?: string;
   status: AgentStatus;
   context: AgentContext;
   createdAt: Date;

@@ -27,7 +27,8 @@ Agent Team 是一个创新的多智能体项目管理系统，通过定义不同
 | v6 | 工具生态系统增强 | 已完成 |
 | v7 | 可观测性与持久化工作流 | 已完成 |
 | v8 | 知识库与持久化记忆 | 已完成 |
-| v9 | 自进化与插件生态 | 进行中 (70%) |
+| v9 | 自进化与插件生态 | 已完成 |
+| v10 | 主控会话编排（Master + Worker、记忆与压缩） | 规划中（见 docs/v10） |
 
 ## 快速开始
 
@@ -195,26 +196,32 @@ DATA_DIR=./data
 
 ## 测试
 
+基于 [Vitest](https://vitest.dev/)，`vitest.config.ts` 中对 `src/plugins`、`src/evolution` 配置了覆盖率门槛。
+
 ```bash
-# 运行所有测试
+# 全部测试（单元 + v9 E2E + 回归冒烟）
 npm test
 
-# 单元测试
+# 监听模式
+npm run test:watch
+
+# 覆盖率（v9 相关模块 + 门槛校验）
+npm run test:coverage
+
+# 排除 e2e 文件时可用（package 内为除 e2e 外的全部 tests/**/*.test.ts）
 npm run test:unit
 
-# 集成测试
-npm run test:integration
-
-# 端到端测试
+# 仅 v9 端到端场景
 npm run test:e2e
 ```
 
+- `tests/v9/` — 插件加载、沙箱、动态工具、自评估、Prompt 优化、注册表、E2E
+- `tests/regression/` — `createContainer` 与文件存储等核心路径冒烟（v5–v8 兼容）
+
 ## 文档
 
-- [架构设计](docs/architecture/ARCHITECTURE.md)
-- [API 文档](docs/reference/API.md)
-- [开发指南](docs/guides/DEVELOPMENT.md)
-- [v9 需求文档](docs/v9/01-requirements.md)
+- **v10（规划中）**：[需求 PRD](docs/v10/01-requirements.md) · [架构](docs/v10/02-architecture.md) · [任务拆分](docs/v10/03-task-breakdown.md) · [API / 事件契约](docs/v10/04-api-events-contracts.md)
+- **v9**：[需求（PRD）](docs/v9/01-requirements.md) · [架构](docs/v9/02-architecture.md) · [任务拆分](docs/v9/03-task-breakdown.md)
 
 ## 许可证
 

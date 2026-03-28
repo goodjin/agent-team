@@ -1,32 +1,31 @@
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { defineConfig } from 'vitest/config';
-import { resolve } from 'path';
+
+const rootDir = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   test: {
-    globals: true,
     environment: 'node',
     include: ['tests/**/*.test.ts'],
-    exclude: ['tests/e2e/browser.test.ts'], // Exclude Playwright E2E tests
+    testTimeout: 30_000,
+    hookTimeout: 30_000,
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      include: ['src/**/*.ts'],
-      exclude: ['src/types/*.ts', '**/*.d.ts', 'tests/e2e/browser.test.ts'],
-    },
-    setupFiles: ['tests/setup.ts'],
-    alias: {
-      '@': resolve(__dirname, './src'),
-    },
-    pool: 'threads',
-    poolOptions: {
-      threads: {
-        singleThread: true, // 避免并行测试的隔离问题
+      reporter: ['text', 'json-summary', 'html'],
+      include: ['src/plugins/**/*.ts', 'src/evolution/**/*.ts'],
+      exclude: ['**/index.ts', 'src/plugins/types.ts'],
+      thresholds: {
+        lines: 75,
+        functions: 82,
+        branches: 60,
+        statements: 75,
       },
     },
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, './src'),
+      '@': path.resolve(rootDir, 'src'),
     },
   },
 });

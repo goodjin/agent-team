@@ -1,0 +1,7 @@
+{
+  "name": "forbidden-import",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "Uses blocked module in source",
+  "entry": "index.js"
+}

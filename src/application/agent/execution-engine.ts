@@ -1,10 +1,27 @@
+import { EventEmitter } from 'events';
 import { Agent } from '../../domain/agent/index.js';
 import { Task } from '../../domain/task/index.js';
 import { ToolRegistry, ToolContext } from '../../domain/tool/index.js';
 import { LLMService, Message, ToolCall } from '../../infrastructure/llm/index.js';
 import { ILogger } from '../../infrastructure/logger/index.js';
 import { IEventBus } from '../../infrastructure/event-bus/index.js';
+import type { ContextCompressor } from '../memory/context-compressor.js';
+import { formatLLMProviderError, llmErrorMetadata } from '../../infrastructure/llm/error-format.js';
 import * as path from 'path';
+
+/** DomainEvent `agent.execution.finished` 的 payload，供 SelfEvaluator / 记忆等订阅 */
+export interface AgentExecutionFinishedPayload {
+  taskId: string;
+  agentId: string;
+  success: boolean;
+  toolCallCount: number;
+  tokenUsed: number;
+  durationMs: number;
+  iterationCount: number;
+  summary?: string;
+  toolsUsed: string[];
+  errorMessage?: string;
+}
 
 /**
  * 执行上下文
@@ -18,53 +35,90 @@ interface ExecutionContext {
 
 /**
  * Agent执行引擎
- * 实现ReAct（Reasoning + Acting）执行循环
+ * 实现ReAct（Reasoning + Acting）执行循环；扩展 EventEmitter 以接入 observability/middleware。
  */
-export class AgentExecutionEngine {
+export class AgentExecutionEngine extends EventEmitter {
   constructor(
     private llmService: LLMService,
     private toolRegistry: ToolRegistry,
     private logger: ILogger,
     private eventBus: IEventBus,
-    private maxIterations: number = 50
-  ) {}
+    private maxIterations: number = 50,
+    private contextCompressor: ContextCompressor | null = null
+  ) {
+    super();
+  }
 
   /**
    * 执行Agent任务
-   * @param agent - Agent实例
-   * @param task - 任务
+   * @param options.signal 可选中止信号（v10+）
    */
-  async execute(agent: Agent, task: Task): Promise<void> {
+  async execute(
+    agent: Agent,
+    task: Task,
+    options?: { signal?: AbortSignal }
+  ): Promise<void> {
+    const signal = options?.signal;
     const context: ExecutionContext = {
       agent,
       task,
       messages: this.buildInitialMessages(agent, task),
-      iterationCount: 0
+      iterationCount: 0,
     };
 
-    // 发布进度更新（开始）
+    const runStart = Date.now();
+    let totalTokens = 0;
+    let toolCallCount = 0;
+    const toolsUsed: string[] = [];
+    let lastSummary = '';
+
     await this.updateProgress(context, 0);
+
+    this.emit('loop:started', { taskId: task.id, maxIterations: this.maxIterations });
+
+    let didCompressMessages = false;
 
     try {
       while (context.iterationCount < this.maxIterations) {
+        if (signal?.aborted) {
+          throw new Error('Aborted');
+        }
         context.iterationCount++;
 
-        // 计算当前进度（基于迭代次数）
+        if (!didCompressMessages && this.contextCompressor) {
+          context.messages = await this.contextCompressor.maybeCompressMessages(context.messages);
+          didCompressMessages = true;
+        }
+
         const progress = Math.min(90, Math.floor((context.iterationCount / this.maxIterations) * 100));
         await this.updateProgress(context, progress);
 
-        // 1. 调用LLM思考
-        const response = await this.think(context);
+        this.emit('llm:calling', {
+          iteration: context.iterationCount,
+          estimatedTokens: Math.min(8000, context.messages.length * 400),
+        });
 
-        // 2. 检查是否有工具调用
+        const response = await this.think(context);
+        totalTokens += response.usage?.total ?? 0;
+
         if (response.message.toolCalls && response.message.toolCalls.length > 0) {
-          // 3. 执行工具
-          for (const toolCall of response.message.toolCalls) {
-            await this.executeTool(context, toolCall);
+          const batch = response.message.toolCalls;
+          this.emit('tools:executing', {
+            iteration: context.iterationCount,
+            toolCount: batch.length,
+          });
+
+          const results: Array<{ name: string; success: boolean; duration: number }> = [];
+          for (const toolCall of batch) {
+            const { success, duration } = await this.executeTool(context, toolCall);
+            results.push({ name: toolCall.name, success, duration });
+            toolCallCount++;
+            toolsUsed.push(toolCall.name);
           }
+          this.emit('tools:executed', { iteration: context.iterationCount, results });
         } else {
-          // 无工具调用，任务完成
-          await this.logCompletion(context, response.message.content);
+          lastSummary = response.message.content || '';
+          await this.logCompletion(context, lastSummary);
           break;
         }
       }
@@ -73,44 +127,106 @@ export class AgentExecutionEngine {
         throw new Error(`Max iterations (${this.maxIterations}) reached`);
       }
 
-      // 发布进度更新（完成）
+      this.emit('loop:completed', {
+        taskId: context.task.id,
+        iterations: context.iterationCount,
+        tokensUsed: totalTokens,
+        toolCalls: toolCallCount,
+      });
+
+      await this.publishExecutionFinished(context, {
+        success: true,
+        totalTokens,
+        toolCallCount,
+        toolsUsed,
+        runStart,
+        summary: lastSummary,
+      });
+
       await this.updateProgress(context, 100);
     } catch (error) {
-      // 记录错误
+      const errMsg = error instanceof Error ? error.message : String(error);
+      this.emit('loop:error', {
+        taskId: context.task.id,
+        iterations: context.iterationCount,
+        error: errMsg,
+      });
+
+      await this.publishExecutionFinished(context, {
+        success: false,
+        totalTokens,
+        toolCallCount,
+        toolsUsed,
+        runStart,
+        errorMessage: errMsg,
+      });
+
       await this.logger.log({
         timestamp: new Date(),
         level: 'error',
         taskId: context.task.id,
         agentId: context.agent.id,
         type: 'error',
-        content: `Agent执行失败: ${error instanceof Error ? error.message : String(error)}`,
-        metadata: { iteration: context.iterationCount }
+        content: `Agent执行失败: ${errMsg}`,
+        metadata: {
+          iteration: context.iterationCount,
+          ...(error instanceof Error && error.message !== errMsg
+            ? { causeMessage: error.message }
+            : {}),
+          ...llmErrorMetadata(error),
+        },
       });
       throw error;
     }
   }
 
-  /**
-   * 更新任务进度
-   */
+  private async publishExecutionFinished(
+    context: ExecutionContext,
+    opts: {
+      success: boolean;
+      totalTokens: number;
+      toolCallCount: number;
+      toolsUsed: string[];
+      runStart: number;
+      summary?: string;
+      errorMessage?: string;
+    }
+  ): Promise<void> {
+    const durationMs = Date.now() - opts.runStart;
+    const payload: AgentExecutionFinishedPayload = {
+      taskId: context.task.id,
+      agentId: context.agent.id,
+      success: opts.success,
+      toolCallCount: opts.toolCallCount,
+      tokenUsed: opts.totalTokens,
+      durationMs,
+      iterationCount: context.iterationCount,
+      summary: opts.summary,
+      toolsUsed: opts.toolsUsed,
+      errorMessage: opts.errorMessage,
+    };
+    await this.eventBus.publish({
+      type: 'agent.execution.finished',
+      timestamp: new Date(),
+      payload,
+    });
+  }
+
   private async updateProgress(context: ExecutionContext, percent: number): Promise<void> {
-    // 发布进度事件（用于 WebSocket 推送）
     await this.eventBus.publish({
       type: 'task.progress',
       timestamp: new Date(),
       payload: {
         taskId: context.task.id,
         percent,
-        iteration: context.iterationCount
-      }
+        iteration: context.iterationCount,
+      },
     });
   }
 
-  /**
-   * 思考阶段：调用LLM获取下一步行动
-   */
-  private async think(context: ExecutionContext): Promise<{ message: Message; usage: { prompt: number; completion: number; total: number } }> {
-    // 记录思考开始
+  private async think(
+    context: ExecutionContext
+  ): Promise<{ message: Message; usage: { prompt: number; completion: number; total: number } }> {
     await this.logger.log({
       timestamp: new Date(),
       level: 'debug',
@@ -118,25 +234,46 @@ export class AgentExecutionEngine {
       agentId: context.agent.id,
       type: 'thought',
       content: 'Agent正在思考...',
-      metadata: { iteration: context.iterationCount }
+      metadata: { iteration: context.iterationCount },
     });
 
-    // 转换工具定义为LLM格式
-    const tools = this.toolRegistry.list().map(t => ({
+    const tools = this.toolRegistry.list().map((t) => ({
       name: t.name,
       description: t.description,
-      parameters: t.parameters
+      parameters: t.parameters,
     }));
 
-    // 调用LLM
-    const response = await this.llmService.chatDefault({
-      messages: context.messages,
-      tools,
-      temperature: 0.7,
-      maxTokens: 4000
+    let response;
+    try {
+      response = await this.llmService.chatDefault({
+        messages: context.messages,
+        tools,
+        temperature: 0.7,
+        maxTokens: 4000,
+      });
+    } catch (llmErr) {
+      const detail = formatLLMProviderError(llmErr);
+      const meta = llmErrorMetadata(llmErr);
+      await this.logger.log({
+        timestamp: new Date(),
+        level: 'error',
+        taskId: context.task.id,
+        agentId: context.agent.id,
+        type: 'error',
+        content: `LLM 调用失败: ${detail}`,
+        metadata: { phase: 'think', ...meta },
+      });
+      throw new Error(`LLM 调用失败: ${detail}`);
+    }
+
+    this.emit('llm:response', {
+      iteration: context.iterationCount,
+      stopReason: response.message.toolCalls?.length ? 'tool_use' : 'end_turn',
+      contentLength: (response.message.content || '').length,
+      toolCalls: response.message.toolCalls?.length ?? 0,
+      tokensUsed: response.usage?.total ?? 0,
     });
 
-    // 记录思考结果
     await this.logger.log({
       timestamp: new Date(),
       level: 'info',
@@ -147,26 +284,27 @@ export class AgentExecutionEngine {
       metadata: {
         iteration: context.iterationCount,
         hasToolCalls: !!response.message.toolCalls?.length,
-        usage: response.usage
-      }
+        usage: response.usage,
+      },
     });
 
-    // 添加到消息历史
     context.messages.push(response.message);
 
     return response;
   }
 
   /**
-   * 执行工具调用
+   * 执行工具调用，返回是否成功与耗时（供 observability tools:executed）
    */
-  private async executeTool(context: ExecutionContext, toolCall: ToolCall): Promise<void> {
+  private async executeTool(
+    context: ExecutionContext,
+    toolCall: ToolCall
+  ): Promise<{ success: boolean; duration: number }> {
     const tool = this.toolRegistry.get(toolCall.name);
     if (!tool) {
       throw new Error(`Tool not found: ${toolCall.name}`);
     }
 
-    // 记录工具调用
     await this.logger.log({
       timestamp: new Date(),
       level: 'info',
@@ -176,25 +314,23 @@ export class AgentExecutionEngine {
       content: `调用工具: ${toolCall.name}`,
       metadata: {
         toolName: toolCall.name,
-        toolInput: toolCall.arguments
-      }
+        toolInput: toolCall.arguments,
+      },
     });
 
-    // 确保工作目录存在（使用绝对路径）
     const { mkdir } = await import('fs/promises');
     const workingDirectory = path.resolve(process.cwd(), `data/workspaces/${context.task.id}`);
     try {
       await mkdir(workingDirectory, { recursive: true });
-    } catch (e) {
-      // 目录可能已存在，忽略错误
+    } catch {
+      // ignore
     }
 
-    // 执行工具
     const startTime = Date.now();
     const toolContext: ToolContext = {
       taskId: context.task.id,
       agentId: context.agent.id,
-      workingDirectory
+      workingDirectory,
     };
 
     let result;
@@ -203,13 +339,12 @@ export class AgentExecutionEngine {
     } catch (error) {
       result = {
         success: false,
-        error: error instanceof Error ? error.message : String(error)
+        error: error instanceof Error ? error.message : String(error),
       };
     }
 
     const duration = Date.now() - startTime;
 
-    // 记录工具结果
     await this.logger.log({
       timestamp: new Date(),
       level: result.success ? 'info' : 'error',
@@ -220,11 +355,10 @@ export class AgentExecutionEngine {
       metadata: {
         toolName: toolCall.name,
         toolOutput: result.success ? result.data : result.error,
-        duration
-      }
+        duration,
+      },
     });
 
-    // 如果是写文件操作且成功，触发artifact事件
     if (tool.name === 'write_file' && result.success) {
       await this.eventBus.publish({
         type: 'file.created',
@@ -232,34 +366,39 @@ export class AgentExecutionEngine {
         payload: {
           taskId: context.task.id,
           filePath: toolCall.arguments.path,
-          fileSize: Buffer.byteLength(toolCall.arguments.content || '', 'utf-8')
-        }
+          fileSize: Buffer.byteLength(toolCall.arguments.content || '', 'utf-8'),
+        },
       });
     }
 
-    // 添加工具结果到消息历史
     context.messages.push({
       role: 'tool',
       content: JSON.stringify(result.success ? result.data : { error: result.error }),
-      toolCallId: toolCall.id
+      toolCallId: toolCall.id,
     });
+
+    return { success: result.success, duration };
   }
 
-  /**
-   * 构建初始消息
-   */
   private buildInitialMessages(agent: Agent, task: Task): Message[] {
+    const workerBrief =
+      agent.kind === 'worker' &&
+      typeof agent.context.variables?.workerBrief === 'string' &&
+      agent.context.variables.workerBrief.trim()
+        ? `\n\n## 主控派工说明\n${agent.context.variables.workerBrief.trim()}\n`
+        : '';
+
     return [
       {
         role: 'system',
-        content: agent.context.systemPrompt
+        content: agent.context.systemPrompt,
       },
       {
         role: 'user',
         content: `请完成以下任务:
 
 标题: ${task.title}
-描述: ${task.description || '无'}
+描述: ${task.description || '无'}${workerBrief}
 
 ## 执行要求
 
@@ -283,14 +422,11 @@ export class AgentExecutionEngine {
 - 代码文件用对应语言后缀
 - 可以创建多个文件组织内容
 
-完成后请简要总结：创建了哪些文件，存放在哪里。`
-      }
+完成后请简要总结：创建了哪些文件，存放在哪里。`,
+      },
     ];
   }
 
-  /**
-   * 记录任务完成
-   */
   private async logCompletion(context: ExecutionContext, summary: string): Promise<void> {
     await this.logger.log({
       timestamp: new Date(),
@@ -299,7 +435,7 @@ export class AgentExecutionEngine {
       agentId: context.agent.id,
       type: 'milestone',
       content: `任务完成: ${summary}`,
-      metadata: { totalIterations: context.iterationCount }
+      metadata: { totalIterations: context.iterationCount },
     });
   }
 }

@@ -23,15 +23,15 @@
 
 ---
 
-## 输出文件
+## 输出文件（与仓库一致）
 
 | 文件 | 说明 |
 |------|------|
-| `tests/v9/e2e.test.ts` | 端到端集成测试主文件 |
-| `tests/v9/e2e-hot-reload.test.ts` | 热更新专项测试 |
-| `tests/v9/e2e-sandbox.test.ts` | 沙箱安全专项测试 |
-| `tests/v9/e2e-evolution.test.ts` | 自进化闭环专项测试 |
-| `tests/v9/fixtures/` | 测试用插件和数据 |
+| `tests/v9/e2e.test.ts` | 集成 / 演封闭式 / 热重载等价路径 / `fs.watch` 启停 |
+| `tests/v9/*.test.ts` | PluginLoader、Sandbox、Validator、DynamicToolLoader、SelfEvaluator、PromptOptimizer、Registry |
+| `tests/v9/fixtures/` | 最小 tool 插件、依赖排序、循环依赖、`child_process` 恶意样例 |
+| `tests/regression/core-exports.test.ts` | `createContainer`、文件存储目录初始化 |
+| `vitest.config.ts` | Vitest + `@vitest/coverage-v8`（`src/plugins`、`src/evolution` 覆盖率门槛） |
 
 ---
 
@@ -293,9 +293,9 @@ async function seedDecliningTrend(evaluator: SelfEvaluator, agentId: string) {
 ### 步骤 5：运行现有测试验证兼容性
 
 ```bash
-# 在 CI 环境中，先运行 v9 新测试，再运行全量测试
-npx jest tests/v9/
-npx jest  # 运行所有测试（包含 v5-v8）
+npm run test        # 全部测试（v9 + 回归）
+npm run test:e2e    # 仅 tests/v9/e2e.test.ts
+npm run test:coverage
 ```
 
 ---
@@ -329,6 +329,6 @@ npx jest  # 运行所有测试（包含 v5-v8）
 
 1. **文件系统测试隔离**：每个测试用例使用独立的临时目录，`afterEach` 中清理，避免测试间干扰
 2. **热更新测试的时间敏感性**：CI 环境中 I/O 可能较慢，建议将 3 秒限制放宽到 5 秒，或通过事件监听代替轮询
-3. **ESM 在 Jest 中的配置**：需要在 `jest.config.ts` 中配置 `experimental-vm-modules` 以支持 ESM 动态 import 测试
+3. **ESM 动态 import**：使用 Vitest（`vitest.config.ts`），与源码中 `*.js` 导入后缀一致；同一路径模块可能被 Node 缓存，热重载集成测试采用新 `entry` 文件规避
 4. **循环依赖测试**：`cyclic-a` 和 `cyclic-b` 的 `plugin.json` 的 `dependencies` 互相引用，验证两者均拒绝加载
 5. **并发热更新测试**：验证热更新期间正在进行的调用不中断，需要在触发文件变化的同时发起耗时较长的工具调用

@@ -1,0 +1,11 @@
+{
+  "name": "dep-consumer",
+  "version": "1.0.0",
+  "type": "hook",
+  "description": "Depends on dep-base",
+  "entry": "index.js",
+  "dependencies": ["dep-base"],
+  "hook": {
+    "events": ["tool:after"]
+  }
+}

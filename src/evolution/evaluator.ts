@@ -2,6 +2,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import { randomUUID } from 'crypto';
+import type { IEventBus } from '../infrastructure/event-bus/index.js';
 
 export interface EvaluationReport {
   id: string;
@@ -147,6 +148,36 @@ export class SelfEvaluator extends EventEmitter {
    */
   getHistory(limit: number = 20): EvaluationReport[] {
     return this.evaluations.slice(-limit);
+  }
+
+  /**
+   * 订阅全局 EventBus 上的 `agent.execution.finished`（由 AgentExecutionEngine 发布）。
+   */
+  attachToDomainEventBus(bus: IEventBus): void {
+    bus.subscribe('agent.execution.finished', async (event) => {
+      const p = event.payload as {
+        taskId: string;
+        toolCallCount?: number;
+        tokenUsed?: number;
+        durationMs?: number;
+        iterationCount?: number;
+        success?: boolean;
+      };
+      try {
+        await this.evaluate(
+          {
+            toolCallCount: p.toolCallCount ?? 0,
+            tokenUsed: p.tokenUsed ?? 0,
+            duration: p.durationMs ?? 0,
+            iterationCount: p.iterationCount ?? 0,
+            success: p.success ?? false,
+          },
+          p.taskId
+        );
+      } catch (err) {
+        console.error('[SelfEvaluator] Evaluation failed (bus):', err);
+      }
+    });
   }
 
   /**

@@ -590,14 +590,14 @@ v9.0 不引入：
 
 | 任务编号 | 任务名称 | 优先级 | 预计工时 | 输出产物 |
 |---------|---------|--------|---------|---------|
-| T1 | 实现 PluginLoader（扫描、ESM 动态加载、拓扑排序） | P0 | 3d | `src/v9/plugin/PluginLoader.ts` |
-| T2 | 实现 PluginSandbox（黑名单检查、超时保护、异常隔离） | P0 | 2d | `src/v9/plugin/PluginSandbox.ts` |
-| T3 | 实现 DynamicToolLoader（工具注册、热更新、版本管理） | P0 | 3d | `src/v9/tool/DynamicToolLoader.ts` |
+| T1 | 实现 PluginLoader（扫描、ESM 动态加载、拓扑排序） | P0 | 3d | `src/plugins/loader.ts` |
+| T2 | 实现 PluginSandbox（黑名单检查、超时保护、异常隔离） | P0 | 2d | `src/plugins/sandbox.ts` |
+| T3 | 实现 DynamicToolLoader（工具注册、热更新、版本管理） | P0 | 3d | `src/plugins/dynamic-tool-loader.ts` |
 
 **Phase 1 验收标准**：
 - 3 个工具插件可正式加载并被 Agent 调用
-- 修改工具文件 3 秒内热更新生效
-- 单元测试覆盖率 >= 80%
+- 修改工具文件 3 秒内热更新生效（`DynamicToolLoader` + `fs.watch`；ESM 下同路径模块可能被运行时缓存，建议升级版本号或更换 `entry` 入口文件）
+- 自动化测试与覆盖率：`npm run test:coverage`（`src/plugins`、`src/evolution` 门槛见仓库根目录 `vitest.config.ts`）
 
 ---
 
@@ -607,8 +607,8 @@ v9.0 不引入：
 
 | 任务编号 | 任务名称 | 优先级 | 预计工时 | 输出产物 |
 |---------|---------|--------|---------|---------|
-| T4 | 实现 SelfEvaluator（三维度评分、趋势分析、优化建议） | P1 | 3d | `src/v9/eval/SelfEvaluator.ts` |
-| T5 | 实现 PromptOptimizer（版本管理、变体生成、A/B 测试） | P1 | 4d | `src/v9/optimizer/PromptOptimizer.ts` |
+| T4 | 实现 SelfEvaluator（三维度评分、趋势分析、优化建议） | P1 | 3d | `src/evolution/evaluator.ts` |
+| T5 | 实现 PromptOptimizer（版本管理、变体生成、A/B 测试） | P1 | 4d | `src/evolution/prompt-optimizer.ts` |
 
 **Phase 2 验收标准**：
 - 执行 20 次任务后，SelfEvaluator 趋势分析返回有意义数据
@@ -623,14 +623,14 @@ v9.0 不引入：
 
 | 任务编号 | 任务名称 | 优先级 | 预计工时 | 输出产物 |
 |---------|---------|--------|---------|---------|
-| T6 | 实现 PluginRegistry（YAML 索引、安装流程、统计） | P2 | 2d | `src/v9/registry/PluginRegistry.ts` |
-| T7 | plugin.json Schema 验证器 + 3 个示例插件 | P0 | 1d | `src/v9/plugin/PluginValidator.ts`, `plugins/examples/` |
-| T8 | 端到端集成测试（插件加载 → 工具调用 → 自评估 → Prompt 优化） | P0 | 2d | `tests/v9/` |
+| T6 | 实现 PluginRegistry（本地 JSON 索引、安装流程、统计） | P2 | 2d | `src/plugins/registry.ts`（默认 `plugins/registry.json`） |
+| T7 | plugin.json Schema 验证器 + 三类示例插件 | P0 | 1d | `src/plugins/validator.ts`；示例见 `plugins/http-request`、`plugins/code-reviewer`、`plugins/audit-logger` |
+| T8 | 自动化测试（单测、E2E、回归冒烟、覆盖率） | P0 | 2d | `tests/v9/`、`tests/regression/`、`vitest.config.ts` |
 
 **Phase 3 验收标准**：
-- 完整 E2E 场景：加载工具插件 → Agent 调用 → 自评估 → 趋势触发 → 生成变体
-- 与 v5-v8 集成无回归（现有测试全部通过）
-- 3 个示例插件覆盖三种插件类型（tool/role/hook）
+- 完整 E2E 场景：加载工具插件 → 工具执行 → 自评估 → 评分下降链接触发 → Prompt 变体生成（见 `tests/v9/e2e.test.ts`）
+- 回归：`tests/regression/` 对核心容器与文件存储冒烟；全量 `npm test` 通过
+- 3 个示例插件覆盖三种插件类型（tool/role/hook），位于 `plugins/` 目录
 
 ---
 

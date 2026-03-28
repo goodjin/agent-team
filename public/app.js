@@ -10,6 +10,16 @@ const state = {
   filter: 'all',
   loading: false,
   ws: null,
+  /** 主区展示「新建任务」表单（不弹窗） */
+  createMode: false,
+  /** 执行日志按成员筛选：agentId 或 null 表示全部 */
+  logAgentId: null,
+  /** v10 右侧对话区消息 */
+  chatMessages: [],
+  /** GET /api/tasks/:id/members 缓存 */
+  taskMembers: null,
+  /** 打开任务后主区：chat=对话（默认） | details=任务详情 */
+  taskViewMode: 'chat',
   tabData: {
     logs: [],
     subtasks: [],
@@ -58,14 +68,25 @@ function timeAgo(date) {
   return `${Math.floor(seconds / 86400)}天前`;
 }
 
-// API 请求
+// API 请求（失败时带上响应体片段，便于排查）
 async function api(path, options = {}) {
+  const { headers: hdr, ...rest } = options;
   const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...options
+    headers: { 'Content-Type': 'application/json', ...(hdr || {}) },
+    ...rest
   });
-  if (!res.ok) throw new Error(`API Error: ${res.status}`);
-  return res.json();
+  if (!res.ok) {
+    let bodySnippet = '';
+    try {
+      bodySnippet = (await res.text()).slice(0, 1500);
+    } catch (_) {}
+    const msg = `API ${res.status} ${res.statusText || ''}${bodySnippet ? ` | ${bodySnippet}` : ''}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  return res.text();
 }
 
 // 获取任务列表
@@ -91,7 +112,6 @@ async function fetchTask(taskId) {
   
   try {
     state.currentTask = await api(`/api/tasks/${taskId}`);
-    state.currentTab = 'overview';
   } catch (e) {
     console.error('Failed to fetch task:', e);
   }
@@ -100,12 +120,35 @@ async function fetchTask(taskId) {
   render();
 }
 
-// 获取任务日志
-async function fetchTaskLogs(taskId) {
+// 获取任务日志（可选 agentId 仅看某成员）
+async function fetchTaskLogs(taskId, agentId) {
   try {
-    return await api(`/api/tasks/${taskId}/logs`);
+    const q = agentId ? `?agentId=${encodeURIComponent(agentId)}` : '';
+    return await api(`/api/tasks/${taskId}/logs${q}`);
   } catch (e) {
     console.error('Failed to fetch logs:', e);
+    return [];
+  }
+}
+
+async function fetchTaskMembers(taskId) {
+  try {
+    return await api(`/api/tasks/${taskId}/members`);
+  } catch (e) {
+    console.error('Failed to fetch members:', e);
+    return null;
+  }
+}
+
+async function fetchMasterConversation(taskId) {
+  try {
+    const data = await api(`/api/tasks/${taskId}/master/conversation`);
+    const list = data && Array.isArray(data.messages) ? data.messages : [];
+    return list
+      .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+      .map((m) => ({ role: m.role, content: String(m.content || ''), ts: Date.now() }));
+  } catch (e) {
+    console.error('Failed to fetch master conversation:', e);
     return [];
   }
 }
@@ -130,12 +173,12 @@ async function fetchArtifacts(taskId) {
   }
 }
 
-// 创建任务
-async function createTask(title, description) {
+// 创建任务（默认 v10 主控对话模式；标题/描述可省略，由后端默认）
+async function createTask(payload = {}) {
   try {
     const task = await api('/api/tasks', {
       method: 'POST',
-      body: JSON.stringify({ title, description })
+      body: JSON.stringify({ orchestrationMode: 'v10-master', ...payload })
     });
     state.tasks.unshift(task);
     render();
@@ -267,6 +310,24 @@ function handleWebSocketEvent(event) {
       showNotification('错误: ' + event.data.message, 'error');
       break;
 
+    case 'master_reply':
+      if (state.currentTask) {
+        state.chatMessages.push({
+          role: 'assistant',
+          content: event.data?.content || '',
+          ts: Date.now()
+        });
+        render();
+      }
+      break;
+
+    case 'master_session':
+      fetchTaskMembers(state.currentTask?.id).then((m) => {
+        state.taskMembers = m;
+        render();
+      });
+      break;
+
     default:
       console.log('Unknown event type:', event.type);
   }
@@ -278,6 +339,15 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/** HTML 属性用（data-*），避免 onclick 拼接 id 导致引号/百分号破坏页面脚本 */
+function escapeAttr(text) {
+  if (text == null) return '';
+  return String(text)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;');
 }
 
 function getStatusText(status) {
@@ -294,6 +364,7 @@ function getStatusText(status) {
 function getRoleName(role) {
   const map = {
     'task-analyzer': '任务分析师',
+    'task-master': '主控 Agent',
     'product-manager': '产品经理',
     'architect': '架构师',
     'backend-dev': '后端开发',
@@ -746,6 +817,41 @@ function renderMarkdown(text) {
   return html;
 }
 
+/** 与后端一致：去掉 </think> 思考块（旧会话兜底） */
+function stripThinkingBlocksClient(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/<think\b[^>]*>[\s\S]*?<\/think>/gi, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function chatContentLooksLikeMarkdown(s) {
+  if (!s || typeof s !== 'string') return false;
+  return (
+    /```/.test(s) ||
+    /^#{1,6}\s/m.test(s) ||
+    /\*\*[^*]+\*\*/.test(s) ||
+    /^\s*[-*+]\s/m.test(s) ||
+    /^\s*\d+\.\s/m.test(s)
+  );
+}
+
+/** 对话区：用户纯文本换行；助手去思考后 Markdown 或预格式 */
+function formatChatBubbleHtml(role, content) {
+  const raw = String(content || '');
+  if (role === 'user') {
+    const esc = escapeHtml(raw);
+    return `<div class="chat-msg-body chat-msg-plain">${esc.replace(/\n/g, '<br>')}</div>`;
+  }
+  const visible = stripThinkingBlocksClient(raw);
+  if (!visible) return '<div class="chat-msg-body chat-msg-plain muted">（无可见内容）</div>';
+  if (chatContentLooksLikeMarkdown(visible)) {
+    return `<div class="chat-msg-body chat-msg-md markdown-body">${renderMarkdown(visible)}</div>`;
+  }
+  return `<div class="chat-msg-body chat-msg-plain">${escapeHtml(visible).replace(/\n/g, '<br>')}</div>`;
+}
+
 // 渲染 JSON 树形视图
 function renderJsonTree(data, depth = 0) {
   if (depth > 10) return '<span class="json-ellipsis">...</span>';
@@ -924,7 +1030,7 @@ function renderTaskList() {
     <div class="container">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
         <h2 class="page-title">任务列表</h2>
-        <button class="btn-primary" onclick="showCreateModal()">
+        <button class="btn-primary" onclick="startInlineCreate()">
           <span>+</span> 新建任务
         </button>
       </div>
@@ -1028,38 +1134,53 @@ function renderTabContentSync() {
   }
 
   if (state.currentTab === 'logs') {
-    // 异步加载日志
-    fetchTaskLogs(task.id).then(logs => {
-      state.tabData.logs = logs;
+    const taskId = task.id;
+    const expectedAgent = state.logAgentId || null;
+    fetchTaskLogs(taskId, expectedAgent || undefined).then((logs) => {
       const el = document.getElementById('tab-content');
-      if (el && state.currentTab === 'logs') {
-        el.innerHTML = renderLogsContent(logs);
-        scrollLogsToBottom();
-      }
+      if (!el || state.currentTab !== 'logs') return;
+      if (!state.currentTask || state.currentTask.id !== taskId) return;
+      const currentAgent = state.logAgentId || null;
+      if (currentAgent !== expectedAgent) return;
+      state.tabData.logs = logs;
+      el.innerHTML = renderLogsContent(logs);
+      scrollLogsToBottom();
+    });
+    return `<div class="loading"><div class="spinner"></div></div>`;
+  }
+
+  if (state.currentTab === 'members') {
+    const taskId = task.id;
+    fetchTaskMembers(taskId).then((m) => {
+      const el = document.getElementById('tab-content');
+      if (!el || state.currentTab !== 'members') return;
+      if (!state.currentTask || state.currentTask.id !== taskId) return;
+      state.taskMembers = m;
+      el.innerHTML = renderMembersTabContent(m);
     });
     return `<div class="loading"><div class="spinner"></div></div>`;
   }
 
   if (state.currentTab === 'subtasks') {
-    // 异步加载子任务
-    fetchSubtasks(task.id).then(subtasks => {
-      state.tabData.subtasks = subtasks;
+    const taskId = task.id;
+    fetchSubtasks(taskId).then((subtasks) => {
       const el = document.getElementById('tab-content');
-      if (el && state.currentTab === 'subtasks') {
-        el.innerHTML = renderSubtasksContent(subtasks);
-      }
+      if (!el || state.currentTab !== 'subtasks') return;
+      if (!state.currentTask || state.currentTask.id !== taskId) return;
+      state.tabData.subtasks = subtasks;
+      el.innerHTML = renderSubtasksContent(subtasks);
     });
     return `<div class="loading"><div class="spinner"></div></div>`;
   }
 
   if (state.currentTab === 'artifacts') {
-    // 异步加载成品
-    fetchArtifacts(task.id).then(artifacts => {
-      state.currentTask.artifacts = artifacts;
+    const taskId = task.id;
+    fetchArtifacts(taskId).then((artifacts) => {
       const el = document.getElementById('tab-content');
-      if (el && state.currentTab === 'artifacts') {
-        el.innerHTML = renderArtifactsContent(artifacts);
-      }
+      if (!el || state.currentTab !== 'artifacts') return;
+      if (!state.currentTask || state.currentTask.id !== taskId) return;
+      state.currentTask.artifacts = artifacts;
+      el.innerHTML = renderArtifactsContent(artifacts);
     });
     return `<div class="loading"><div class="spinner"></div></div>`;
   }
@@ -1104,7 +1225,17 @@ function renderOverviewContent(task) {
 // 渲染日志内容（增强版，支持工具调用格式化）
 function renderLogsContent(logs) {
   if (!logs || logs.length === 0) {
-    return `<div class="empty-state"><div class="empty-state-text">暂无执行日志</div></div>`;
+    const filtered = !!state.logAgentId;
+    return `
+      <div class="empty-state">
+        <div class="empty-state-text">${filtered ? '该成员下暂无日志条目' : '暂无执行日志'}</div>
+        ${
+          filtered
+            ? `<p class="empty-log-hint muted">仅展示带有成员标识的日志；工人尚未执行或主控日志可能不在此筛选下。</p>
+               <button type="button" class="btn btn-primary btn-sm" data-filter-agent="">查看全部日志</button>`
+            : ''
+        }
+      </div>`;
   }
 
   let html = `<div class="timeline">`;
@@ -1159,8 +1290,12 @@ function renderLogsContent(logs) {
 function shouldRenderAsMarkdown(content, type) {
   if (!content || typeof content !== 'string') return false;
 
-  // thought 和 milestone 类型的日志通常包含 Markdown
-  const mdTypes = ['thought', 'milestone', 'action'];
+  // 思考、里程碑：任务详情日志中应完整格式化展示（含换行与 Markdown）
+  if (type === 'thought' || type === 'milestone') {
+    return true;
+  }
+
+  const mdTypes = ['action'];
   if (!mdTypes.includes(type)) return false;
 
   // 检测 Markdown 特征
@@ -1420,69 +1555,118 @@ async function downloadAllArtifacts() {
   }
 }
 
-// 创建任务模态框状态
-let createModalVisible = false;
-
-// 模态框相关函数
-function showCreateModal() {
-  createModalVisible = true;
+function startInlineCreate() {
+  state.createMode = true;
+  state.currentTask = null;
+  state.chatMessages = [];
+  state.taskViewMode = 'chat';
+  if (state.ws) {
+    state.ws.close();
+    state.ws = null;
+  }
+  updateUrl();
   render();
 }
 
-function hideCreateModal() {
-  createModalVisible = false;
+function cancelInlineCreate() {
+  state.createMode = false;
+  state.chatMessages = [];
   render();
 }
 
-function renderCreateModal() {
-  if (!createModalVisible) return '';
-  
-  return `
-    <div class="modal-overlay" onclick="hideCreateModal()">
-      <div class="modal" onclick="event.stopPropagation()">
-        <div class="modal-header">
-          <h3 class="modal-title">新建任务</h3>
-          <button class="modal-close" onclick="hideCreateModal()">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="form-group">
-            <label class="form-label">任务标题</label>
-            <input type="text" class="form-input" id="task-title" placeholder="输入任务标题">
-          </div>
-          <div class="form-group">
-            <label class="form-label">任务描述</label>
-            <textarea class="form-input" id="task-desc" placeholder="详细描述任务内容..."></textarea>
-          </div>
-        </div>
-        <div class="modal-footer">
-          <button class="btn" onclick="hideCreateModal()">取消</button>
-          <button class="btn btn-success" onclick="submitCreateTask()">创建</button>
-        </div>
-      </div>
-    </div>
-  `;
+/** 传统 v9 且正在自动执行时禁止主控输入，避免与调度器双轨 */
+function isMasterChatInputDisabled(task) {
+  if (!task) return false;
+  const mode = task.orchestrationMode;
+  const legacy = mode === undefined || mode === 'v9-legacy';
+  return legacy && task.status === 'running';
 }
 
-async function submitCreateTask() {
-  const titleEl = document.getElementById('task-title');
-  const descEl = document.getElementById('task-desc');
-  
-  const title = titleEl ? titleEl.value.trim() : '';
-  const description = descEl ? descEl.value.trim() : '';
-  
-  if (!title) {
-    alert('请输入任务标题');
+window.sendMasterChat = async function () {
+  const input = document.getElementById('master-chat-input');
+  if (!input) return;
+  const text = input.value.trim();
+  if (!text) return;
+
+  if (state.createMode) {
+    input.value = '';
+    state.chatMessages.push({ role: 'user', content: text, ts: Date.now() });
+    render();
+    try {
+      const title = text.split('\n')[0].trim().slice(0, 80) || '新对话';
+      const task = await createTask({ title, description: '' });
+      state.createMode = false;
+      state.tasks.unshift(task);
+      state.currentTask = task;
+      state.taskViewMode = 'chat';
+      updateUrl();
+      connectWebSocket(task.id);
+      await api(`/api/tasks/${task.id}/start`, { method: 'POST' });
+      state.currentTask = await api(`/api/tasks/${task.id}`);
+      const r = await api(`/api/tasks/${task.id}/master/messages`, {
+        method: 'POST',
+        body: JSON.stringify({ content: text })
+      });
+      state.chatMessages = await fetchMasterConversation(task.id);
+      if (state.chatMessages.length === 0) {
+        state.chatMessages = [
+          { role: 'user', content: text, ts: Date.now() },
+          { role: 'assistant', content: r.reply || '', ts: Date.now() }
+        ];
+      }
+      state.taskMembers = await fetchTaskMembers(task.id);
+      showNotification('任务已创建', 'success');
+    } catch (e) {
+      state.chatMessages.push({
+        role: 'assistant',
+        content: '❌ 创建或发送失败: ' + e.message,
+        ts: Date.now()
+      });
+      state.createMode = true;
+      state.currentTask = null;
+      if (state.ws) {
+        state.ws.close();
+        state.ws = null;
+      }
+      showNotification('失败: ' + e.message, 'error');
+    }
+    render();
     return;
   }
-  
-  try {
-    const task = await createTask(title, description);
-    hideCreateModal();
-    viewTask(task.id);
-  } catch (e) {
-    alert('创建任务失败: ' + e.message);
+
+  if (!state.currentTask) return;
+  if (isMasterChatInputDisabled(state.currentTask)) {
+    showNotification('传统模式执行中，请待自动执行结束后再与主控对话', 'warning');
+    return;
   }
-}
+
+  input.value = '';
+  state.chatMessages.push({ role: 'user', content: text, ts: Date.now() });
+  render();
+  try {
+    const r = await api(`/api/tasks/${state.currentTask.id}/master/messages`, {
+      method: 'POST',
+      body: JSON.stringify({ content: text })
+    });
+    state.chatMessages = await fetchMasterConversation(state.currentTask.id);
+    if (state.chatMessages.length === 0) {
+      state.chatMessages.push({
+        role: 'assistant',
+        content: r.reply || '',
+        ts: Date.now()
+      });
+    }
+  } catch (e) {
+    state.chatMessages.push({
+      role: 'assistant',
+      content: '❌ 发送失败: ' + e.message,
+      ts: Date.now()
+    });
+  }
+  await fetchTask(state.currentTask.id);
+  state.taskMembers = await fetchTaskMembers(state.currentTask.id);
+  render();
+};
 
 // 导航函数 - 暴露到全局
 window.setFilter = function(filter) {
@@ -1491,20 +1675,51 @@ window.setFilter = function(filter) {
 };
 
 window.setTab = function(tab) {
+  state.taskViewMode = 'details';
   state.currentTab = tab;
+  if (tab !== 'logs') state.logAgentId = null;
+  updateUrl();
+  render();
+};
+
+window.setTaskViewMode = function (mode) {
+  state.taskViewMode = mode === 'details' ? 'details' : 'chat';
+  if (state.taskViewMode === 'chat') {
+    state.logAgentId = null;
+  }
+  updateUrl();
+  render();
+};
+
+window.filterLogsByMember = function(agentId) {
+  state.taskViewMode = 'details';
+  state.logAgentId = agentId || null;
+  state.currentTab = 'logs';
+  updateUrl();
+  render();
+};
+
+window.openDeliverableTab = function() {
+  state.taskViewMode = 'details';
+  state.currentTab = 'artifacts';
   updateUrl();
   render();
 };
 
 window.viewTask = function(taskId) {
-  // 获取任务详情
   (async () => {
     state.loading = true;
+    state.createMode = false;
+    state.chatMessages = [];
+    state.logAgentId = null;
+    state.taskViewMode = 'chat';
     render();
 
     try {
       state.currentTask = await api(`/api/tasks/${taskId}`);
       state.currentTab = 'overview';
+      state.taskMembers = await fetchTaskMembers(taskId);
+      state.chatMessages = await fetchMasterConversation(taskId);
       updateUrl();
       connectWebSocket(taskId);
     } catch (e) {
@@ -1522,7 +1737,11 @@ window.goBack = function() {
     state.ws = null;
   }
   state.currentTask = null;
+  state.createMode = false;
+  state.taskMembers = null;
+  state.chatMessages = [];
   state.currentTab = 'overview';
+  state.taskViewMode = 'chat';
   updateUrl();
   render();
 };
@@ -1535,8 +1754,13 @@ function updateUrl() {
 
   if (state.currentTask) {
     params.set('task', state.currentTask.id);
-    if (state.currentTab && state.currentTab !== 'overview') {
-      params.set('tab', state.currentTab);
+    if (state.taskViewMode === 'details') {
+      params.set('section', 'details');
+      if (state.currentTab && state.currentTab !== 'overview') {
+        params.set('tab', state.currentTab);
+      }
+    } else {
+      params.set('section', 'chat');
     }
   }
 
@@ -1561,9 +1785,11 @@ function restoreFromUrl() {
     state.filter = filter;
   }
 
-  // 恢复任务视图
+  const validTabs = ['overview', 'logs', 'subtasks', 'artifacts', 'members'];
+  const section = params.get('section');
+  state.taskViewMode = section === 'details' ? 'details' : 'chat';
   if (taskId) {
-    state.currentTab = tab || 'overview';
+    state.currentTab = tab && validTabs.includes(tab) ? tab : 'overview';
     return taskId;
   }
 
@@ -1578,6 +1804,8 @@ window.addEventListener('popstate', () => {
     (async () => {
       try {
         state.currentTask = await api(`/api/tasks/${taskId}`);
+        state.taskMembers = await fetchTaskMembers(taskId);
+        state.chatMessages = await fetchMasterConversation(taskId);
         connectWebSocket(taskId);
       } catch (e) {
         console.error('Failed to restore task:', e);
@@ -1592,13 +1820,13 @@ window.addEventListener('popstate', () => {
     }
     state.currentTask = null;
     state.currentTab = 'overview';
+    state.taskViewMode = 'chat';
     render();
   }
 });
 
-window.showCreateModal = showCreateModal;
-window.hideCreateModal = hideCreateModal;
-window.submitCreateTask = submitCreateTask;
+window.startInlineCreate = startInlineCreate;
+window.cancelInlineCreate = cancelInlineCreate;
 window.startTask = startTask;
 window.pauseTask = pauseTask;
 window.resumeTask = resumeTask;
@@ -1610,29 +1838,30 @@ window.handleModalAction = handleModalAction;
 
 // 主渲染函数
 function render() {
-  const modal = renderCreateModal();
+  const mainBody = state.createMode
+    ? renderCreateWorkspace()
+    : state.currentTask
+      ? renderTaskDetailPanel()
+      : renderEmptyDetail();
 
-  // 两栏布局：左侧任务列表 + 右侧任务详情
   const html = `
     <div class="app-layout">
-      <!-- 左侧：任务列表 -->
       <aside class="sidebar">
         ${renderSidebar()}
       </aside>
-
-      <!-- 右侧：任务详情 -->
       <main class="main-content">
-        ${state.currentTask ? renderTaskDetailPanel() : renderEmptyDetail()}
+        ${mainBody}
       </main>
     </div>
-    ${modal}
   `;
 
   document.getElementById('app').innerHTML = html;
 
-  // 如果是详情页，异步加载标签页内容
-  if (state.currentTask && state.currentTab !== 'overview') {
-    renderTabContentSync();
+  if (state.createMode || (state.currentTask && state.taskViewMode === 'chat')) {
+    requestAnimationFrame(() => {
+      const el = document.getElementById('master-chat-messages');
+      if (el) el.scrollTop = el.scrollHeight;
+    });
   }
 }
 
@@ -1645,7 +1874,7 @@ function renderSidebar() {
   return `
     <div class="sidebar-header">
       <h1 class="sidebar-title">🤖 Agent Team</h1>
-      <button class="btn-create" onclick="showCreateModal()" title="新建任务">+</button>
+      <button class="btn-create" onclick="startInlineCreate()" title="新建任务">+</button>
     </div>
 
     <div class="filter-tabs">
@@ -1694,31 +1923,140 @@ function renderEmptyDetail() {
     <div class="empty-detail">
       <div class="empty-detail-icon">👈</div>
       <div class="empty-detail-title">选择一个任务</div>
-      <div class="empty-detail-text">从左侧列表中选择一个任务查看详情</div>
-      <button class="btn btn-primary btn-lg" onclick="showCreateModal()">
+      <div class="empty-detail-text">从左侧列表选择任务，或新建任务（直接与主 Agent 对话创建）</div>
+      <button class="btn btn-primary btn-lg" onclick="startInlineCreate()">
         + 创建新任务
       </button>
     </div>
   `;
 }
 
-// 渲染任务详情面板
+function renderCreateWorkspace() {
+  return `
+    <div class="create-workspace-chat-only">
+      <div class="create-chat-toolbar">
+        <h2 class="create-chat-title">新建任务</h2>
+        <button type="button" class="btn" onclick="cancelInlineCreate()">取消</button>
+      </div>
+      <p class="create-chat-hint muted">首条消息将创建任务并启动主控；标题自动取首行摘要。</p>
+      <div class="chat-panel-full">${renderMasterChatPanel()}</div>
+    </div>
+  `;
+}
+
+function renderMemberChipsHtml() {
+  const m = state.taskMembers;
+  if (!m || ((!m.agents || !m.agents.length) && (!m.deliverables || !m.deliverables.length))) {
+    return '<div class="member-tags muted">成员与产出：运行后自动刷新；点击成员将打开「任务详情 → 执行日志」</div>';
+  }
+  let html =
+    '<div class="member-tags"><span class="member-tags-label">成员与产出</span><span class="member-tags-hint muted">点击成员 → 执行日志</span>';
+  const chipActive =
+    state.taskViewMode === 'details' && state.currentTab === 'logs' && !!state.logAgentId;
+  for (const a of m.agents || []) {
+    const kindLabel = a.kind === 'master' ? '主控' : '工人';
+    const label = `${kindLabel} ${escapeHtml(a.displayName)}`;
+    const active = chipActive && state.logAgentId === a.id ? ' is-active' : '';
+    html += `<button type="button" class="member-chip${a.kind === 'master' ? ' is-master' : ''}${active}" data-filter-agent="${escapeAttr(a.id)}" title="查看该成员执行日志">${label} <small>${a.status}</small></button>`;
+  }
+  for (const d of m.deliverables || []) {
+    html += `<button type="button" class="member-chip is-deliverable" onclick="openDeliverableTab()" title="打开成品页">${getFileIcon(d.type)} ${escapeHtml(d.name)}</button>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+/** 主 Agent 对话区（新建模式 / 任务对话标签共用） */
+function renderMasterChatPanel() {
+  const create = state.createMode;
+  const task = state.currentTask;
+  const disabled = !create && task && isMasterChatInputDisabled(task);
+  const placeholder = create
+    ? '描述目标或需求，Enter 发送（将创建任务并启动主控）'
+    : disabled
+      ? '传统模式自动执行中，请稍候再与主控对话…'
+      : '补充需求、追问进展、讨论重做…（Enter 发送，Shift+Enter 换行）';
+  const emptyHint = create
+    ? '输入首条消息即可创建任务并与主 Agent 对话'
+    : '发送消息与主 Agent 对话（已完成或失败的任务也可继续沟通）';
+  const msgs = state.chatMessages
+    .map((m) => {
+      const roleLabel = m.role === 'user' ? '你' : '主 Agent';
+      const body = formatChatBubbleHtml(m.role, m.content);
+      return `<div class="chat-msg chat-msg-${m.role}"><span class="chat-msg-role">${roleLabel}</span>${body}</div>`;
+    })
+    .join('');
+  const body = msgs || `<div class="chat-empty muted">${emptyHint}</div>`;
+  const header = create ? '主 Agent · 新建' : '主 Agent 对话';
+  return `
+    <div class="chat-aside-header">${header}</div>
+    <div class="master-chat-messages" id="master-chat-messages">${body}</div>
+    <div class="master-chat-input-row">
+      <textarea id="master-chat-input" class="form-input chat-input" rows="5" placeholder="${escapeHtml(placeholder)}" ${disabled ? 'disabled' : ''} onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMasterChat();}"></textarea>
+      <button type="button" class="btn btn-primary chat-send" onclick="sendMasterChat()" ${disabled ? 'disabled' : ''}>发送</button>
+    </div>
+  `;
+}
+
+function renderMembersTabContent(m) {
+  if (!m) return '<div class="empty-state"><div class="empty-state-text">加载失败</div></div>';
+  let html = '<div class="members-tab"><h3 class="members-section-title">智能体成员</h3><div class="member-grid">';
+  for (const a of m.agents || []) {
+    html += `
+      <div class="member-card" role="button" tabindex="0" data-filter-agent="${escapeAttr(a.id)}">
+        <div class="member-card-title">${escapeHtml(a.displayName)}</div>
+        <div class="member-card-meta">${a.kind || 'worker'} · ${escapeHtml(a.roleId)}</div>
+        <span class="status-badge small ${a.status}">${a.status}</span>
+        <div class="member-card-action">查看执行日志 →</div>
+      </div>`;
+  }
+  html += '</div>';
+  html += '<h3 class="members-section-title">规划 / 报告 / 产出</h3><div class="member-grid">';
+  for (const d of m.deliverables || []) {
+    html += `
+      <div class="member-card deliverable" role="button" onclick="openDeliverableTab()">
+        <div class="member-card-title">${getFileIcon(d.type)} ${escapeHtml(d.name)}</div>
+        <div class="member-card-meta">${escapeHtml(d.mimeType || '')}</div>
+      </div>`;
+  }
+  html += '</div></div>';
+  return html;
+}
+
+// 任务主界面：默认「对话」标签；「任务详情」内为原有多 Tab
 function renderTaskDetailPanel() {
   const task = state.currentTask;
   if (!task) return renderEmptyDetail();
 
-  return `
-    <div class="detail-panel">
+  const filterBanner =
+    state.logAgentId && state.currentTab === 'logs'
+      ? `<div class="log-filter-banner">当前筛选：单个成员日志 <button type="button" class="btn btn-sm" data-filter-agent="">查看全部</button></div>`
+      : '';
+
+  const topBar = `
+    <div class="task-shell-bar">
+      <button type="button" class="btn btn-ghost back-btn" onclick="goBack()">← 列表</button>
+      <h2 class="task-shell-title">${escapeHtml(task.title)}</h2>
+      <span class="status-badge large ${task.status}">${getStatusText(task.status)}</span>
+    </div>
+    <div class="task-view-segmented">
+      <button type="button" class="seg-tab ${state.taskViewMode === 'chat' ? 'active' : ''}" onclick="setTaskViewMode('chat')">💬 对话</button>
+      <button type="button" class="seg-tab ${state.taskViewMode === 'details' ? 'active' : ''}" onclick="setTaskViewMode('details')">📋 任务详情</button>
+    </div>
+    <div class="task-shared-members">${renderMemberChipsHtml()}</div>
+  `;
+
+  const chatView = `<div class="chat-panel-full">${renderMasterChatPanel()}</div>`;
+
+  const detailsView = `
+    <div class="detail-panel detail-panel-nested">
       <div class="detail-header">
-        <div class="detail-title-row">
-          <h2 class="detail-title">${escapeHtml(task.title)}</h2>
-          <span class="status-badge large ${task.status}">${getStatusText(task.status)}</span>
-        </div>
         <div class="detail-meta-row">
           <span class="meta-item">
             <span class="meta-icon">👤</span>
             <span>${getRoleName(task.role)}</span>
           </span>
+          ${task.orchestrationMode === 'v10-master' ? '<span class="meta-item"><span class="meta-icon">🎯</span><span>主控编排</span></span>' : '<span class="meta-item"><span class="meta-icon">⚙️</span><span>传统执行</span></span>'}
           <span class="meta-item">
             <span class="meta-icon">📅</span>
             <span>创建: ${formatDate(task.createdAt)}</span>
@@ -1731,22 +2069,32 @@ function renderTaskDetailPanel() {
           ` : ''}
         </div>
         <div class="detail-actions">
-          ${task.status === 'pending' ? `<button class="btn btn-success" onclick="startTask('${task.id}')">▶ 开始执行</button>` : ''}
-          ${task.status === 'running' ? `<button class="btn btn-warning" onclick="pauseTask('${task.id}')">⏸ 暂停</button>` : ''}
-          ${task.status === 'paused' ? `<button class="btn btn-success" onclick="resumeTask('${task.id}')">▶ 继续</button>` : ''}
-          ${task.status === 'failed' ? `<button class="btn btn-danger" onclick="retryTask('${task.id}')">↻ 重试</button>` : ''}
+          ${task.status === 'pending' ? `<button type="button" class="btn btn-success" onclick="startTask('${task.id}')">▶ 开始执行</button>` : ''}
+          ${task.status === 'running' ? `<button type="button" class="btn btn-warning" onclick="pauseTask('${task.id}')">⏸ 暂停</button>` : ''}
+          ${task.status === 'paused' ? `<button type="button" class="btn btn-success" onclick="resumeTask('${task.id}')">▶ 继续</button>` : ''}
+          ${task.status === 'failed' ? `<button type="button" class="btn btn-danger" onclick="retryTask('${task.id}')">↻ 重试</button>` : ''}
         </div>
       </div>
 
       <div class="tabs">
         <div class="tab ${state.currentTab === 'overview' ? 'active' : ''}" onclick="setTab('overview')">📋 概览</div>
+        <div class="tab ${state.currentTab === 'members' ? 'active' : ''}" onclick="setTab('members')">👥 成员与产出</div>
         <div class="tab ${state.currentTab === 'logs' ? 'active' : ''}" onclick="setTab('logs')">📝 执行日志</div>
         <div class="tab ${state.currentTab === 'subtasks' ? 'active' : ''}" onclick="setTab('subtasks')">🔀 子任务</div>
         <div class="tab ${state.currentTab === 'artifacts' ? 'active' : ''}" onclick="setTab('artifacts')">📦 成品</div>
       </div>
-
+      ${filterBanner}
       <div class="tab-content" id="tab-content">
         ${renderTabContentSync()}
+      </div>
+    </div>
+  `;
+
+  return `
+    <div class="task-main-shell">
+      ${topBar}
+      <div class="task-view-body">
+        ${state.taskViewMode === 'chat' ? chatView : detailsView}
       </div>
     </div>
   `;
@@ -1760,17 +2108,29 @@ async function init() {
   // 从 URL 恢复状态
   const taskId = restoreFromUrl();
   if (taskId) {
-    // 静默加载任务详情（不更新 URL）
     try {
       state.currentTask = await api(`/api/tasks/${taskId}`);
+      state.taskMembers = await fetchTaskMembers(taskId);
+      state.chatMessages = await fetchMasterConversation(taskId);
       connectWebSocket(taskId);
     } catch (e) {
       console.error('Failed to restore task from URL:', e);
       state.currentTask = null;
     }
-    render();
   }
+  render();
 }
+
+// 成员日志筛选：委托点击，避免内联 onclick + decodeURIComponent 在非法序列时抛错导致整页白屏
+document.addEventListener('click', (e) => {
+  const app = document.getElementById('app');
+  if (!app || !e.target || !app.contains(e.target)) return;
+  const el = e.target.closest('[data-filter-agent]');
+  if (!el) return;
+  const raw = el.getAttribute('data-filter-agent');
+  const id = raw == null ? '' : raw;
+  window.filterLogsByMember(id);
+});
 
 // 启动应用
 init();

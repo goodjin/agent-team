@@ -2,10 +2,24 @@ import { WebSocket, WebSocketServer } from 'ws';
 import { Server as HttpServer } from 'http';
 
 export interface WebSocketEvent {
-  type: 'status_change' | 'log_entry' | 'artifact_created' | 'subtask_created' | 'progress_update' | 'error';
+  type:
+    | 'status_change'
+    | 'log_entry'
+    | 'artifact_created'
+    | 'subtask_created'
+    | 'progress_update'
+    | 'error'
+    | 'master_reply'
+    | 'master_session'
+    | 'orchestration.plan_updated'
+    | 'worker.status';
   timestamp: string;
   data: any;
 }
+
+export type WebSocketClientMessage =
+  | { type: 'user.message'; content: string; clientMessageId?: string }
+  | { type: 'user.ping' };
 
 export interface IWebSocketManager {
   subscribe(taskId: string, ws: WebSocket): void;
@@ -18,7 +32,12 @@ export class WebSocketManager implements IWebSocketManager {
   private clients: Map<string, Set<WebSocket>> = new Map();
   private wss: WebSocketServer | null = null;
 
-  attachToServer(server: HttpServer): void {
+  attachToServer(
+    server: HttpServer,
+    options?: {
+      onClientMessage?: (taskId: string, message: WebSocketClientMessage) => void;
+    }
+  ): void {
     this.wss = new WebSocketServer({ server });
 
     this.wss.on('connection', (ws, req) => {
@@ -27,6 +46,17 @@ export class WebSocketManager implements IWebSocketManager {
 
       if (taskId) {
         this.subscribe(taskId, ws);
+
+        ws.on('message', (raw) => {
+          try {
+            const parsed = JSON.parse(raw.toString()) as WebSocketClientMessage;
+            if (parsed.type === 'user.message' && typeof parsed.content === 'string') {
+              options?.onClientMessage?.(taskId, parsed);
+            }
+          } catch {
+            console.warn('[WebSocket] invalid client message');
+          }
+        });
 
         ws.on('close', () => {
           this.unsubscribe(taskId, ws);

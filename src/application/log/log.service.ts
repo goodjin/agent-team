@@ -19,7 +19,7 @@ export class LogService {
   async getTimeline(taskId: string, options?: QueryOptions): Promise<TimelineEntry[]> {
     const logs = await this.logger.query(taskId, {
       ...options,
-      order: 'asc'
+      order: options?.order ?? 'asc',
     });
 
     return logs.map(log => ({

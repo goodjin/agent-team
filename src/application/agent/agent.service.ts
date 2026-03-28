@@ -2,24 +2,23 @@ import { Agent, Role, AgentContext, IAgentRepository, RoleMatcher } from '../../
 import { Task, ITaskRepository } from '../../domain/task/index.js';
 import { IEventBus } from '../../infrastructure/event-bus/index.js';
 import { ILogger } from '../../infrastructure/logger/index.js';
-import { ToolRegistry, ToolContext, builtinTools } from '../../domain/tool/index.js';
+import { ToolRegistry } from '../../domain/tool/index.js';
 import { generateId } from '../../infrastructure/utils/id.js';
 import { AgentExecutionEngine } from './execution-engine.js';
 
 export class AgentService {
   private roleMatcher: RoleMatcher;
-  private toolRegistry: ToolRegistry;
 
   constructor(
     private agentRepo: IAgentRepository,
     private taskRepo: ITaskRepository,
     private eventBus: IEventBus,
     private logger: ILogger,
-    private executionEngine: AgentExecutionEngine
+    private executionEngine: AgentExecutionEngine,
+    /** 与 AgentExecutionEngine 共用，含内置工具 + 插件工具 */
+    private toolRegistry: ToolRegistry
   ) {
     this.roleMatcher = new RoleMatcher();
-    this.toolRegistry = new ToolRegistry();
-    this.toolRegistry.registerMany(builtinTools);
   }
 
   async createAgent(taskId: string, roleId: string): Promise<Agent> {
@@ -57,7 +56,11 @@ export class AgentService {
     return this.agentRepo.findByTaskId(taskId);
   }
 
-  async execute(agentId: string, task?: Task): Promise<void> {
+  async execute(
+    agentId: string,
+    task?: Task,
+    engineOptions?: { signal?: AbortSignal }
+  ): Promise<void> {
     const agent = await this.getAgent(agentId);
     if (!agent) throw new Error(`Agent not found: ${agentId}`);
 
@@ -82,7 +85,7 @@ export class AgentService {
     });
 
     try {
-      await this.runAgentLoop(agent, task);
+      await this.runAgentLoop(agent, task, engineOptions);
 
       agent.status = 'completed';
       agent.completedAt = new Date();
@@ -104,12 +107,17 @@ export class AgentService {
         timestamp: new Date(),
         payload: { agentId, error: String(error) }
       });
+
+      throw error;
     }
   }
 
-  private async runAgentLoop(agent: Agent, task: Task): Promise<void> {
-    // 使用AgentExecutionEngine执行ReAct循环
-    await this.executionEngine.execute(agent, task);
+  private async runAgentLoop(
+    agent: Agent,
+    task: Task,
+    engineOptions?: { signal?: AbortSignal }
+  ): Promise<void> {
+    await this.executionEngine.execute(agent, task, engineOptions);
   }
 
   matchRole(description: string): string {

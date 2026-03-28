@@ -373,20 +373,19 @@ agent-team/
 │   │   ├── loader.ts                 # PluginLoader：扫描、排序、加载
 │   │   ├── sandbox.ts                # PluginSandbox：安全隔离
 │   │   ├── dynamic-tool-loader.ts    # DynamicToolLoader：热更新与版本管理
-│   │   ├── registry.ts               # PluginRegistry：YAML 索引与安装管理
+│   │   ├── registry.ts               # PluginRegistry：JSON 索引与安装管理
 │   │   ├── validator.ts              # PluginValidator：plugin.json Schema 验证
+│   │   ├── types.ts                  # 插件 TypeScript 接口
 │   │   └── index.ts                  # 统一导出
 │   │
 │   ├── evolution/                    # 自进化模块
 │   │   ├── evaluator.ts              # SelfEvaluator：三维度评分与趋势
 │   │   ├── prompt-optimizer.ts       # PromptOptimizer：变体生成与 A/B 测试
 │   │   └── index.ts                  # 统一导出
-│   │
-│   └── types/
-│       └── plugin.ts                 # 共享 TypeScript 接口定义
 │
 ├── plugins/                          # 示例插件目录（项目根）
-│   ├── registry.yaml                 # 本地插件索引
+│   ├── registry.json                 # 本地插件索引（默认，由 PluginRegistry 维护）
+│   ├── registry.yaml                 # 历史/占位文件（可选）
 │   ├── http-request/                 # 示例：工具插件
 │   │   ├── plugin.json
 │   │   └── index.js
@@ -399,15 +398,20 @@ agent-team/
 │       └── index.js
 │
 ├── tests/
-│   └── v9/                           # v9 测试目录
+│   ├── helpers/                      # 测试辅助（临时目录、fixtures 路径）
+│   ├── regression/                   # v5–v8 核心路径冒烟
+│   └── v9/                           # v9 单元测试 + E2E
+│       ├── fixtures/                 # 最小插件、依赖/环、恶意 import 样例
 │       ├── plugin-loader.test.ts
+│       ├── plugin-validator.test.ts
 │       ├── plugin-sandbox.test.ts
 │       ├── dynamic-tool-loader.test.ts
 │       ├── self-evaluator.test.ts
 │       ├── prompt-optimizer.test.ts
 │       ├── plugin-registry.test.ts
-│       └── e2e.test.ts               # 端到端集成测试
+│       └── e2e.test.ts
 │
+├── vitest.config.ts                  # Vitest / 覆盖率门槛
 └── docs/
     └── v9/
         ├── 01-requirements.md

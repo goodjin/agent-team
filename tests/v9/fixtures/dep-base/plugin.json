@@ -1,0 +1,10 @@
+{
+  "name": "dep-base",
+  "version": "1.0.0",
+  "type": "hook",
+  "description": "Base plugin without dependencies",
+  "entry": "index.js",
+  "hook": {
+    "events": ["tool:before"]
+  }
+}

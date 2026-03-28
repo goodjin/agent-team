@@ -2,6 +2,8 @@ export type ToolCategory = 'file' | 'git' | 'code' | 'browser' | 'ai';
 
 export interface JSONSchema {
   type: string;
+  /** 供 LLM 理解自由参数字段的插件工具等 */
+  description?: string;
   properties?: Record<string, { type: string; description?: string }>;
   required?: string[];
 }

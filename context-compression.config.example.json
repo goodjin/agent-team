@@ -1,0 +1,7 @@
+{
+  "softTokensMaster": 4800,
+  "hardTokensMaster": 8000,
+  "keepLastMasterTurns": 8,
+  "hardTokensMessages": 10000,
+  "keepLastMessages": 12
+}

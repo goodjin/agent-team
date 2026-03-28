@@ -47,8 +47,12 @@ export class RoleMatcher {
     return bestRole;
   }
 
-  getRole(id: string): Role {
-    const roles: Record<string, Role> = {
+  private builtinRolesMemo: Record<string, Role> | null = null;
+
+  /** 内置角色表（惰性缓存） */
+  private getBuiltinRoleMap(): Record<string, Role> {
+    if (this.builtinRolesMemo) return this.builtinRolesMemo;
+    this.builtinRolesMemo = {
       'task-analyzer': {
         id: 'task-analyzer',
         name: '任务分析师',
@@ -60,7 +64,16 @@ export class RoleMatcher {
 2. 文件命名规范：使用有意义的英文名称，如 analysis_report.md, research_summary.md
 3. 输出格式：优先使用 Markdown 格式，结构清晰
 4. 完成后简要总结文件位置和主要内容`,
-        allowedTools: ['read_file', 'write_file', 'list_files', 'execute_command', 'search'],
+        allowedTools: [
+          'read_file',
+          'write_file',
+          'list_files',
+          'execute_command',
+          'search',
+          'memory_search',
+          'memory_append',
+          'memory_summarize',
+        ],
         maxTokensPerTask: 4000,
         temperature: 0.3,
         timeout: 300
@@ -76,7 +89,16 @@ export class RoleMatcher {
 2. 文档结构应包含：背景、目标、用户故事、功能需求、非功能需求、验收标准
 3. 使用清晰的 Markdown 格式，包含表格、列表等
 4. 完成后在日志中说明文档位置`,
-        allowedTools: ['read_file', 'write_file', 'list_files', 'execute_command', 'search'],
+        allowedTools: [
+          'read_file',
+          'write_file',
+          'list_files',
+          'execute_command',
+          'search',
+          'memory_search',
+          'memory_append',
+          'memory_summarize',
+        ],
         maxTokensPerTask: 8000,
         temperature: 0.5,
         timeout: 600
@@ -93,7 +115,16 @@ export class RoleMatcher {
 3. 文档应包含：系统架构图(用文字/ASCII描述)、模块划分、技术选型、接口设计、数据模型
 4. 代码示例也要保存为独立文件
 5. 完成后总结文档位置和关键设计决策`,
-        allowedTools: ['read_file', 'write_file', 'list_files', 'execute_command', 'search'],
+        allowedTools: [
+          'read_file',
+          'write_file',
+          'list_files',
+          'execute_command',
+          'search',
+          'memory_search',
+          'memory_append',
+          'memory_summarize',
+        ],
         maxTokensPerTask: 8000,
         temperature: 0.4,
         timeout: 600
@@ -109,7 +140,16 @@ export class RoleMatcher {
 2. 如果有API设计文档，保存为 api_design.md
 3. 代码文件按模块组织，命名规范
 4. 完成后列出创建/修改的文件清单`,
-        allowedTools: ['read_file', 'write_file', 'list_files', 'execute_command', 'search'],
+        allowedTools: [
+          'read_file',
+          'write_file',
+          'list_files',
+          'execute_command',
+          'search',
+          'memory_search',
+          'memory_append',
+          'memory_summarize',
+        ],
         maxTokensPerTask: 10000,
         temperature: 0.3,
         timeout: 900
@@ -125,7 +165,16 @@ export class RoleMatcher {
 2. HTML/CSS/JS 文件按功能组织
 3. 如果有设计说明，保存为 design_notes.md
 4. 完成后列出创建的文件清单，说明如何运行/查看`,
-        allowedTools: ['read_file', 'write_file', 'list_files', 'execute_command', 'search'],
+        allowedTools: [
+          'read_file',
+          'write_file',
+          'list_files',
+          'execute_command',
+          'search',
+          'memory_search',
+          'memory_append',
+          'memory_summarize',
+        ],
         maxTokensPerTask: 10000,
         temperature: 0.3,
         timeout: 900
@@ -141,10 +190,39 @@ export class RoleMatcher {
 2. 测试脚本保存为可执行文件
 3. 测试报告保存为 test_report.md
 4. 用例格式：用例ID、描述、前置条件、步骤、预期结果`,
-        allowedTools: ['read_file', 'write_file', 'list_files', 'execute_command', 'search'],
+        allowedTools: [
+          'read_file',
+          'write_file',
+          'list_files',
+          'execute_command',
+          'search',
+          'memory_search',
+          'memory_append',
+          'memory_summarize',
+        ],
         maxTokensPerTask: 6000,
         temperature: 0.2,
         timeout: 600
+      },
+      'task-master': {
+        id: 'task-master',
+        name: '任务主控 Agent',
+        description: '与用户持续对话、澄清需求、规划并派发工人（v10）',
+        systemPrompt: `你是任务的主控协调者（Master），对用户负责。
+
+## 职责
+1. 用简洁、专业的中文与用户对话，澄清目标、范围、优先级与验收标准。
+2. 需要派工时：先用内置或持久化角色创建工人（create_worker），再 submit_plan 声明 DAG，最后可提示用户调用「开始编排」API 或由系统启动调度。
+3. 对用户可见回复请优先使用工具 reply_user；内部操作用 create_role / create_worker / submit_plan / send_worker_command / query_orchestration_state；记忆用 memory_search / memory_append / memory_summarize（命名空间默认本任务+主控）。
+4. submit_plan 的 nodes 须含 id、workerId，可选 dependsOn、parallelGroup、brief；依赖必须无环且 workerId 为本任务已存在工人。
+5. send_worker_command 须带正确 planVersion（与 query_orchestration_state 一致），否则指令会被丢弃。
+
+## 语气
+可信、透明、可协作。`,
+        allowedTools: [],
+        maxTokensPerTask: 8000,
+        temperature: 0.4,
+        timeout: 600,
       },
       'doc-writer': {
         id: 'doc-writer',
@@ -161,18 +239,37 @@ export class RoleMatcher {
    - 更新日志: CHANGELOG.md
 3. 使用清晰的 Markdown 格式，包含目录、代码示例、截图说明
 4. 完成后说明文档位置和主要内容`,
-        allowedTools: ['read_file', 'write_file', 'list_files', 'execute_command', 'search'],
+        allowedTools: [
+          'read_file',
+          'write_file',
+          'list_files',
+          'execute_command',
+          'search',
+          'memory_search',
+          'memory_append',
+          'memory_summarize',
+        ],
         maxTokensPerTask: 6000,
         temperature: 0.4,
         timeout: 300
       }
     };
+    return this.builtinRolesMemo;
+  }
 
+  getRole(id: string): Role {
+    const roles = this.getBuiltinRoleMap();
     return roles[id] || roles['task-analyzer'];
+  }
+
+  /** 严格解析内置角色；未知 id 返回 null（用于 create_worker 校验） */
+  getBuiltinRole(id: string): Role | null {
+    return this.getBuiltinRoleMap()[id] ?? null;
   }
 
   getAllRoles(): Role[] {
     return [
+      this.getRole('task-master'),
       this.getRole('task-analyzer'),
       this.getRole('product-manager'),
       this.getRole('architect'),

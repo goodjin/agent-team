@@ -1,0 +1,10 @@
+{
+  "name": "minimal-tool",
+  "version": "1.0.0",
+  "type": "tool",
+  "description": "Test fixture tool plugin",
+  "entry": "index.js",
+  "tool": {
+    "toolName": "minimal-calc"
+  }
+}

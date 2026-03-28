@@ -95,8 +95,8 @@ Task 6 + Task 7 → Task 8
 **输出**：
 - `src/plugins/loader.ts` — PluginLoader 类
 - `src/plugins/validator.ts` — PluginValidator（Schema 验证）
-- `src/types/plugin.ts` — 共享 TypeScript 接口
-- `tests/v9/plugin-loader.test.ts`
+- `src/plugins/types.ts` — 共享 TypeScript 接口
+- `tests/v9/plugin-loader.test.ts`、`tests/v9/plugin-validator.test.ts`
 
 **核心功能**：
 - 扫描 `plugins/` 目录，读取并验证 `plugin.json`
@@ -136,7 +136,7 @@ Task 6 + Task 7 → Task 8
 - `fs.watch` + 300ms 防抖监听文件变化
 - 热更新时保护正在执行的工具调用
 - 工具版本管理（最多 3 个版本，`Map<name, VersionedTool[]>`）
-- 通过 v7 `StructuredLogger` 记录热更新日志
+- 热更新日志当前以 `console` 输出为主（可按需接 v7 StructuredLogger）
 
 ---
 
@@ -183,15 +183,15 @@ Task 6 + Task 7 → Task 8
 
 **输出**：
 - `src/plugins/registry.ts` — PluginRegistry 类
-- `plugins/registry.yaml`（运行时生成）
+- `plugins/registry.json`（默认路径，运行时生成）
 - `tests/v9/plugin-registry.test.ts`
 
 **核心功能**：
-- YAML 格式本地索引（`plugins/registry.yaml`）
-- `install(sourcePath)` 原子性安装（失败回滚）
+- JSON 格式本地索引（原子写入 tmp + rename）
+- `install(sourcePath)` 验证 manifest 后登记条目
 - 同名冲突检测，不自动覆盖
-- `usage_count` 和 `avg_score` 统计持久化
-- `list()` / `getStats(pluginName)` 查询接口
+- `usage_count` / `avg_score` 统计持久化
+- `list()` / `search()` / 聚合 `getStats()` 查询接口
 
 ---
 
@@ -218,12 +218,13 @@ Task 6 + Task 7 → Task 8
 **优先级**: P1 | **工时**: 4h | **详情**: `docs/v9/tasks/task-08.md`
 
 **输出**：
-- `tests/v9/e2e.test.ts` — 端到端集成测试
-- `tests/v9/regression/` — v5-v8 回归测试补充
+- `tests/v9/e2e.test.ts` — 集成与「热重载等价路径」场景
+- `tests/v9/fixtures/` — 最小插件、依赖排序、循环依赖、黑名单源码样例
+- `tests/regression/core-exports.test.ts` — 核心容器 / 文件存储冒烟
+- `vitest.config.ts` — Vitest + `@vitest/coverage-v8` 门槛
 
 **核心功能**：
-- E2E 场景：加载工具插件 → Agent 调用 → 自评估 → 趋势触发 → 生成 Prompt 变体
-- 热更新 E2E：修改插件文件 → 3 秒内验证工具更新
-- 沙箱安全 E2E：恶意插件尝试访问黑名单模块被拦截
-- v5-v8 兼容性验证：现有测试全部通过
-- 性能基准验证：单插件加载 P99 <= 500ms
+- E2E：加载工具插件 → 执行工具；自评估下降链 → Prompt 变体；仓库内 `plugins/http-request` 探测
+- 热重载：变更 `plugin.json` 的 `entry` 与新入口文件后 `loadPlugin` + `loadToolsFromPlugins`（规避 Node 对同一路径 ESM 缓存）
+- 沙箱：`tests/v9/fixtures/forbidden-import` + 单测覆盖静态拦截
+- v5–v8 兼容：`tests/regression` 冒烟 + 全量 `npm test` 通过；性能 P99 指标可在 CI 中另加基准步骤

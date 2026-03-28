@@ -14,13 +14,20 @@ This document provides guidelines for AI agents working in this codebase.
 - **Trigger**: 用户输入包含需求相关内容时
 - **Keywords**: "需要开发"、"想做"、"想要"、"功能"、"需求"
 
+## 上下文压缩（v10 M3）
+
+- 配置文件（可选）：项目根目录 `context-compression.config.json`，示例见 `context-compression.config.example.json`。
+- 环境变量（覆盖文件）：`AGENT_CONTEXT_SOFT_MASTER_TOKENS`、`AGENT_CONTEXT_HARD_MASTER_TOKENS`、`AGENT_CONTEXT_KEEP_MASTER_TURNS`、`AGENT_CONTEXT_HARD_MESSAGES_TOKENS`、`AGENT_CONTEXT_KEEP_MESSAGES`（均为正整数）。
+
 ## Build, Lint, and Test Commands
 
 ### Core Commands
 ```bash
 npm run build          # Compile TypeScript to JavaScript (tsc)
 npm run dev            # Watch mode compilation
-npm run test           # Run vitest test suite
+npm run test           # Vitest：v9 + 回归（见 tests/）
+npm run test:coverage  # Vitest + 覆盖率（src/plugins、src/evolution）
+npm run test:e2e       # 仅 tests/v9/e2e.test.ts
 npm run lint           # Run ESLint on src directory
 ```
 

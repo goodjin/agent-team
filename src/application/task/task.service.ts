@@ -15,6 +15,7 @@ import { ILogger, LogEntry } from '../../infrastructure/logger/index.js';
 import { IScheduler } from '../../infrastructure/scheduler/index.js';
 import { generateId } from '../../infrastructure/utils/id.js';
 import { AgentService } from '../agent/agent.service.js';
+import { MasterAgentService } from '../master-agent/master-agent.service.js';
 
 export class TaskNotFoundError extends Error {
   constructor(taskId: string) {
@@ -40,14 +41,17 @@ export class TaskService {
     private eventBus: IEventBus,
     private logger: ILogger,
     private scheduler: IScheduler,
-    private agentService: AgentService
+    private agentService: AgentService,
+    private masterAgentService: MasterAgentService
   ) {}
 
   async create(params: CreateTaskParams): Promise<Task> {
+    const title = (params.title && String(params.title).trim()) || '新对话';
+    const description = params.description != null ? String(params.description) : '';
     const task: Task = {
       id: generateId(),
-      title: params.title,
-      description: params.description,
+      title,
+      description,
       status: 'pending',
       role: params.role || 'task-analyzer',
       parentId: params.parentId,
@@ -55,7 +59,8 @@ export class TaskService {
       createdAt: new Date(),
       artifactIds: [],
       logIds: [],
-      subtaskIds: []
+      subtaskIds: [],
+      orchestrationMode: params.orchestrationMode,
     };
 
     await this.taskRepo.save(task);
@@ -114,6 +119,13 @@ export class TaskService {
       timestamp: new Date(),
       payload: { taskId, oldStatus: 'pending', newStatus: 'running' }
     });
+
+    const mode = task.orchestrationMode ?? 'v9-legacy';
+    if (mode === 'v10-master') {
+      await this.masterAgentService.ensureSessionStarted(taskId);
+      await this.logTaskEvent(task.id, 'milestone', 'v10 主控会话已启动（intake），等待用户通过 WS/REST 发消息', {});
+      return;
+    }
 
     // 分析复杂度并可能拆分
     const complexity = this.complexityAnalyzer.analyze(task);
@@ -307,11 +319,14 @@ export class TaskService {
       role: subtask.role
     });
 
-    // 为子任务创建Agent并执行
     const agent = await this.agentService.createAgent(subtask.id, subtask.role);
-    await this.agentService.execute(agent.id, subtask);
+    try {
+      await this.agentService.execute(agent.id, subtask);
+    } catch (err) {
+      await this.fail(subtask.id, String(err));
+      throw err;
+    }
 
-    // 标记子任务完成
     await this.complete(subtask.id);
   }
 

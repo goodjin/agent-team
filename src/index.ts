@@ -3,7 +3,7 @@ import { createContainer } from './container.js';
 async function main() {
   console.log('Starting Agent Team...');
 
-  const container = createContainer('./data');
+  const container = await createContainer('./data');
 
   // 确保数据目录存在
   await container.fileStore.ensureDir('tasks');
@@ -21,7 +21,7 @@ async function main() {
 
 main().catch(console.error);
 
-export { createContainer } from './container.js';
+export { createContainer, type AgentExecutionFinishedPayload, type Container } from './container.js';
 export { TaskService } from './application/task/task.service.js';
 export { LogService } from './application/log/log.service.js';
 export { ArtifactService } from './application/artifact/artifact.service.js';
