@@ -1,7 +1,7 @@
 export type TaskStatus = 'pending' | 'running' | 'paused' | 'completed' | 'failed';
 
-/** 未设置视为 v9 一键执行路径 */
-export type OrchestrationMode = 'v9-legacy' | 'v10-master';
+/** 系统已统一为主控编排 */
+export type OrchestrationMode = 'v10-master';
 
 export type OrchestrationState =
   | 'draft'

@@ -4,7 +4,7 @@
 |----|------|------|------|
 | B1 | `RoleRepository` + `data/roles/*.json` | `save`/`findById`/`list` | 完成 |
 | B2 | `Agent` 扩展 `displayName`、`masterAgentId` | create_worker 写入 | 完成 |
-| B3 | `RoleMatcher.getBuiltinRole` | 未知内置 id 不回落 task-analyzer | 完成 |
+| B3 | `RoleMatcher.getBuiltinRole` / `getRole` | 未知 id 回落 `backend-dev`（已移除 task-analyzer） | 完成 |
 | B4 | `WorkerMailbox` FIFO + priority | 同 worker 串行消费 | 完成 |
 | B5 | 领域事件 `master.to.worker.command`、`worker.to.master.progress`、`orch.plan.submitted` 等 | EventBus 可订阅 | 完成 |
 | B6 | `OrchestratorService` submit_plan / start / DAG 推进 | `POST .../orchestration/start` 可跑层序 | 完成 |

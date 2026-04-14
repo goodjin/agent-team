@@ -520,17 +520,17 @@ const artifactNameSchemas = {
 
 ### 8.1 内置角色（对应 PRD 8.1）
 
-**强制实现 PRD 8.1 定义的6个角色**:
+**强制实现 PRD 8.1 定义的内置角色（含主控）**:
 ```typescript
-// PRD 8.1 内置角色定义
+// PRD 8.1 内置角色定义（示例；task-analyzer 已移除，分析由 task-master 承担）
 const BUILTIN_ROLES: Role[] = [
   {
-    id: 'task-analyzer',
-    name: '任务分析师',
-    description: '分析任务、决定拆分策略',
-    systemPrompt: readFileSync('roles/task-analyzer/system_prompt.md'),
-    allowedTools: ['analyze-code', 'file-read'],
-    maxTokensPerTask: 4000
+    id: 'task-master',
+    name: '任务主控',
+    description: '与用户对话、维护需求文档、拆任务与派工',
+    systemPrompt: readFileSync('roles/task-master/system_prompt.md'),
+    allowedTools: ['reply_user', 'create_worker', 'submit_plan', 'read_file', 'write_file'],
+    maxTokensPerTask: 8000
   },
   {
     id: 'product-manager',
@@ -609,7 +609,7 @@ function matchRole(task: Task): string {
   }
 
   // PRD 8.2: 默认角色
-  return 'task-analyzer';
+  return 'task-master';
 }
 ```
 

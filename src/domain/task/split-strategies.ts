@@ -53,11 +53,11 @@ export interface ISplitStrategy {
 
 export class RoleBasedSplitStrategy implements ISplitStrategy {
   private roleFlows: Record<string, string[]> = {
-    'fullstack': ['task-analyzer', 'product-manager', 'architect', 'backend-dev', 'frontend-dev', 'tester']
+    'fullstack': ['product-manager', 'architect', 'backend-dev', 'frontend-dev', 'tester']
   };
 
   split(task: Task): Omit<Task, 'createdAt' | 'artifactIds' | 'logIds' | 'subtaskIds'>[] {
-    const roles = this.roleFlows[task.role] || ['task-analyzer', 'backend-dev'];
+    const roles = this.roleFlows[task.role] || ['product-manager', 'backend-dev'];
 
     return roles.map((role, index) => ({
       id: generateId(),
@@ -116,13 +116,13 @@ export class StepBasedSplitStrategy implements ISplitStrategy {
 
   private getRoleForStep(step: string): string {
     const roleMap: Record<string, string> = {
-      '需求分析': 'task-analyzer',
+      '需求分析': 'product-manager',
       '设计': 'architect',
       '实现': 'backend-dev',
       '测试': 'tester',
       '文档': 'doc-writer'
     };
-    return roleMap[step] || 'task-analyzer';
+    return roleMap[step] || 'product-manager';
   }
 }
 

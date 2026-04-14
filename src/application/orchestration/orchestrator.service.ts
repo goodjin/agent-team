@@ -1,12 +1,54 @@
 import type { ITaskRepository } from '../../domain/task/task.repository.js';
 import type { IAgentRepository } from '../../domain/agent/agent.repository.js';
+import type { Task } from '../../domain/task/task.entity.js';
 import type { IEventBus } from '../../infrastructure/event-bus/index.js';
 import { WebSocketManager } from '../../infrastructure/websocket/index.js';
 import { parsePlanPayload, topologicalLayers } from '../../domain/orchestration/plan-dag.js';
 import { generateId } from '../../infrastructure/utils/id.js';
-import { WorkerMailbox } from './mailbox.js';
+import { WorkerMailbox, type MailboxEnvelope } from './mailbox.js';
+import path from 'path';
+import { readFile } from 'fs/promises';
 
-type NodeStatus = 'pending' | 'running' | 'completed' | 'failed';
+/** 主控维护的全局需求文档（相对任务工作空间根） */
+export const TASK_REQUIREMENTS_DOC_REL = 'docs/REQUIREMENTS.md';
+
+const REQUIREMENTS_INLINE_MAX_CHARS = 14_000;
+
+async function loadOverallRequirementsText(task: Task): Promise<string> {
+  const abs = path.resolve(process.cwd(), 'data/workspaces', task.id, TASK_REQUIREMENTS_DOC_REL);
+  try {
+    const raw = await readFile(abs, 'utf-8');
+    const t = raw.trim();
+    if (t) {
+      if (t.length <= REQUIREMENTS_INLINE_MAX_CHARS) return t;
+      return (
+        t.slice(0, REQUIREMENTS_INLINE_MAX_CHARS) +
+        '\n\n…（需求正文过长已截断；完整内容请 read_file `docs/REQUIREMENTS.md`）'
+      );
+    }
+  } catch {
+    // 文件不存在或不可读
+  }
+  const d = String(task.description ?? '').trim();
+  if (d) {
+    if (d.length <= REQUIREMENTS_INLINE_MAX_CHARS) return d;
+    return (
+      d.slice(0, REQUIREMENTS_INLINE_MAX_CHARS) +
+      '\n\n…（任务描述过长已截断）'
+    );
+  }
+  return '（尚未写入工作区 docs/REQUIREMENTS.md，且任务描述为空；请 read_file 查看工作区或向主控确认。）';
+}
+
+/** 系统固定派工说明格式：先整体需求正文，再主控下发的节点/派工说明 */
+function formatWorkerAssignBrief(requirementsBody: string, assignmentFromMaster: string): string {
+  const r = (requirementsBody || '').trim() || '（暂无需求正文）';
+  const a =
+    (assignmentFromMaster || '').trim() || '（无单独说明，请结合节点 id 与子任务文档执行）';
+  return `整体任务的需求:\n${r}\n\n以下是主控向你派发的任务：\n${a}`;
+}
+
+type NodeStatus = 'pending' | 'running' | 'reviewing' | 'completed' | 'failed';
 
 interface TrackedNode {
   id: string;
@@ -15,6 +57,8 @@ interface TrackedNode {
   parallelGroup?: string;
   brief?: string;
   status: NodeStatus;
+  reviewAttempts: number;
+  lastReviewNotes?: string;
 }
 
 interface ActivePlan {
@@ -84,7 +128,8 @@ export class OrchestratorService {
 
     const newPv = currentPv + 1;
     task.planVersion = newPv;
-    task.orchestrationState = 'planning';
+    /** 与「开始编排」API 一致：计划落盘后立刻进入执行阶段并派发可运行节点，避免主控只能让用户手动点按钮 */
+    task.orchestrationState = 'executing_workers';
     await this.taskRepo.save(task);
 
     const nodes = new Map<string, TrackedNode>();
@@ -96,11 +141,13 @@ export class OrchestratorService {
         parallelGroup: n.parallelGroup,
         brief: n.brief,
         status: 'pending',
+        reviewAttempts: 0,
       });
     }
 
     const layers = topologicalLayers(parsed.plan.nodes);
-    this.active.set(taskId, { planVersion: newPv, nodes, layers });
+    const ap: ActivePlan = { planVersion: newPv, nodes, layers };
+    this.active.set(taskId, ap);
 
     await this.eventBus.publish({
       type: 'orch.plan.submitted',
@@ -113,6 +160,8 @@ export class OrchestratorService {
       timestamp: new Date().toISOString(),
       data: { taskId, planVersion: newPv, summary: `${parsed.plan.nodes.length} nodes` },
     });
+
+    await this.tryLaunchPending(taskId, ap);
 
     return { ok: true, planVersion: newPv, nodeCount: parsed.plan.nodes.length };
   }
@@ -134,11 +183,14 @@ export class OrchestratorService {
     return { ok: true };
   }
 
-  private classifyPending(n: TrackedNode, nodes: Map<string, TrackedNode>): 'wait' | 'runnable' | 'blocked' {
+  private classifyPending(
+    n: TrackedNode,
+    nodes: Map<string, TrackedNode>
+  ): 'wait' | 'runnable' | 'blocked' {
     for (const d of n.dependsOn) {
       const dn = nodes.get(d);
       if (!dn) return 'blocked';
-      if (dn.status === 'pending' || dn.status === 'running') return 'wait';
+      if (dn.status === 'pending' || dn.status === 'running' || dn.status === 'reviewing') return 'wait';
       if (dn.status === 'failed') return 'blocked';
     }
     return 'runnable';
@@ -158,16 +210,23 @@ export class OrchestratorService {
   }
 
   private async sendAssignWork(taskId: string, ap: ActivePlan, node: TrackedNode): Promise<void> {
+    const task = await this.taskRepo.findById(taskId);
+    if (!task) return;
+
     await this.eventBus.publish({
       type: 'orch.node.ready',
       timestamp: new Date(),
       payload: { taskId, planVersion: ap.planVersion, nodeId: node.id },
     });
 
+    const reqText = await loadOverallRequirementsText(task);
+    const assignment = (node.brief ?? `执行节点 ${node.id}`).trim();
+    const brief = formatWorkerAssignBrief(reqText, assignment);
+
     const correlationId = generateId();
     const body: Record<string, unknown> = {
       op: 'ASSIGN_WORK',
-      brief: node.brief ?? `执行节点 ${node.id}`,
+      brief,
       successCriteria: [],
       nodeId: node.id,
     };
@@ -214,7 +273,7 @@ export class OrchestratorService {
     if (!node) return;
     if (node.status !== 'running') return;
 
-    node.status = success ? 'completed' : 'failed';
+    node.status = success ? 'reviewing' : 'failed';
 
     await this.eventBus.publish({
       type: 'orch.node.completed',
@@ -224,6 +283,8 @@ export class OrchestratorService {
         planVersion: ap.planVersion,
         nodeId,
         workerId: node.workerId,
+        success,
+        reviewAttempts: node.reviewAttempts,
       },
     });
 
@@ -234,11 +295,113 @@ export class OrchestratorService {
         taskId,
         workerId: node.workerId,
         displayName: node.workerId,
-        status: success ? 'completed' : 'failed',
+        status: success ? 'reviewing' : 'failed',
         nodeId,
       },
     });
 
+    await this.tryLaunchPending(taskId, ap);
+  }
+
+  async onNodeReviewDone(
+    taskId: string,
+    nodeId: string,
+    verdict: { passed: boolean; notes: string; reworkBrief?: string },
+    opts?: { maxAttempts?: number }
+  ): Promise<void> {
+    const ap = this.active.get(taskId);
+    if (!ap) return;
+    const node = ap.nodes.get(nodeId);
+    if (!node) return;
+    if (node.status !== 'reviewing') return;
+
+    const maxAttempts = typeof opts?.maxAttempts === 'number' ? opts.maxAttempts : 2;
+    node.lastReviewNotes = verdict.notes;
+
+    if (verdict.passed) {
+      node.status = 'completed';
+      await this.eventBus.publish({
+        type: 'orch.node.reviewed',
+        timestamp: new Date(),
+        payload: {
+          taskId,
+          planVersion: ap.planVersion,
+          nodeId,
+          workerId: node.workerId,
+          passed: true,
+          reviewAttempts: node.reviewAttempts,
+        },
+      });
+      this.wsManager.broadcast(taskId, {
+        type: 'worker.status',
+        timestamp: new Date().toISOString(),
+        data: {
+          taskId,
+          workerId: node.workerId,
+          displayName: node.workerId,
+          status: 'completed',
+          nodeId,
+        },
+      });
+      await this.tryLaunchPending(taskId, ap);
+      return;
+    }
+
+    node.reviewAttempts = (node.reviewAttempts ?? 0) + 1;
+
+    if (node.reviewAttempts > maxAttempts) {
+      node.status = 'failed';
+      await this.eventBus.publish({
+        type: 'orch.node.reviewed',
+        timestamp: new Date(),
+        payload: {
+          taskId,
+          planVersion: ap.planVersion,
+          nodeId,
+          workerId: node.workerId,
+          passed: false,
+          reviewAttempts: node.reviewAttempts,
+          terminal: true,
+        },
+      });
+      this.wsManager.broadcast(taskId, {
+        type: 'worker.status',
+        timestamp: new Date().toISOString(),
+        data: {
+          taskId,
+          workerId: node.workerId,
+          displayName: node.workerId,
+          status: 'failed',
+          nodeId,
+        },
+      });
+      await this.tryLaunchPending(taskId, ap);
+      return;
+    }
+
+    // 返工：把节点重新置为 pending 并立刻重派（brief 追加审查意见）
+    const rework = (verdict.reworkBrief || verdict.notes || '').trim();
+    if (rework) {
+      const prefix = node.brief ? `${node.brief}\n\n` : '';
+      node.brief =
+        prefix +
+        `【质量门禁未通过·第 ${node.reviewAttempts} 轮返工】\n` +
+        `${rework}\n`;
+    }
+    node.status = 'pending';
+    await this.eventBus.publish({
+      type: 'orch.node.reviewed',
+      timestamp: new Date(),
+      payload: {
+        taskId,
+        planVersion: ap.planVersion,
+        nodeId,
+        workerId: node.workerId,
+        passed: false,
+        reviewAttempts: node.reviewAttempts,
+      },
+    });
+    await this.sendAssignWork(taskId, ap, node);
     await this.tryLaunchPending(taskId, ap);
   }
 
@@ -260,14 +423,19 @@ export class OrchestratorService {
     orchestrationState?: string;
     activePlan?: {
       planVersion: number;
+      /** 拓扑分层：每层为一批可并行节点 id（与 submit_plan 解析顺序一致） */
+      layers: string[][];
       nodes: Array<{
         id: string;
         workerId: string;
         status: NodeStatus;
         brief?: string;
         dependsOn: string[];
+        parallelGroup?: string;
       }>;
     };
+    /** 各工人信箱待处理指令（工人视角即「收件箱」） */
+    inboxByWorker: Record<string, MailboxEnvelope[]>;
     mailboxDepths: Record<string, number>;
   }> {
     const task = await this.taskRepo.findById(taskId);
@@ -278,6 +446,7 @@ export class OrchestratorService {
 
     const ap = this.active.get(taskId);
     const mailboxDepths = this.mailbox.depthsForTask(workerIds);
+    const inboxByWorker = this.mailbox.snapshotQueues(workerIds);
 
     return {
       taskPlanVersion: task?.planVersion ?? 0,
@@ -285,15 +454,18 @@ export class OrchestratorService {
       activePlan: ap
         ? {
             planVersion: ap.planVersion,
+            layers: ap.layers.map((layer) => [...layer]),
             nodes: [...ap.nodes.values()].map((n) => ({
               id: n.id,
               workerId: n.workerId,
               status: n.status,
               brief: n.brief,
               dependsOn: n.dependsOn,
+              parallelGroup: n.parallelGroup,
             })),
           }
         : undefined,
+      inboxByWorker,
       mailboxDepths,
     };
   }
@@ -324,6 +496,18 @@ export class OrchestratorService {
       return { ok: false, error: 'WORKER_NOT_FOUND' };
     }
 
+    const op = String(body.op ?? command);
+    let bodyOut: Record<string, unknown> = { ...body, op };
+    if (op === 'ASSIGN_WORK') {
+      const masterAssignment =
+        typeof bodyOut.brief === 'string' ? bodyOut.brief : '（主控未提供 brief）';
+      const reqText = await loadOverallRequirementsText(task);
+      bodyOut = {
+        ...bodyOut,
+        brief: formatWorkerAssignBrief(reqText, masterAssignment),
+      };
+    }
+
     await this.eventBus.publish({
       type: 'master.to.worker.command',
       timestamp: new Date(),
@@ -333,7 +517,7 @@ export class OrchestratorService {
         command,
         correlationId,
         planVersion,
-        body,
+        body: bodyOut,
       },
     });
 
@@ -341,7 +525,7 @@ export class OrchestratorService {
       correlationId,
       planVersion,
       command,
-      body: { ...body, op: body.op ?? command },
+      body: bodyOut,
     });
     this.scheduleWorker(targetWorkerId);
     return { ok: true };

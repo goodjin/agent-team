@@ -395,7 +395,7 @@ interface Artifact {
 
 | 角色标识 | 角色名称 | 职责 | 典型任务 |
 |----------|----------|------|----------|
-| task-analyzer | 任务分析师 | 分析任务、决定拆分策略 | 所有任务的入口 |
+| task-master | 任务主控 | 与用户对话、维护需求文档、拆任务与派工（v10） | 主控编排入口 |
 | product-manager | 产品经理 | 需求分析、PRD编写 | 需求相关任务 |
 | architect | 架构师 | 技术方案、架构设计 | 设计相关任务 |
 | backend-dev | 后端开发 | API开发、业务逻辑 | 后端编码任务 |
@@ -434,7 +434,7 @@ function matchRole(task: Task): string {
   }
 
   // 默认角色
-  return 'task-analyzer';
+  return 'task-master';
 }
 ```
 

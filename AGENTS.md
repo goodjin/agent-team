@@ -24,6 +24,7 @@ This document provides guidelines for AI agents working in this codebase.
 ### Core Commands
 ```bash
 npm run build          # Compile TypeScript to JavaScript (tsc)
+npm run build:web      # Build React UI → public-react/dist (required for http://localhost:3000 UI)
 npm run dev            # Watch mode compilation
 npm run test           # Vitest：v9 + 回归（见 tests/）
 npm run test:coverage  # Vitest + 覆盖率（src/plugins、src/evolution）

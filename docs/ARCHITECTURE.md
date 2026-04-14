@@ -413,7 +413,7 @@ class RoleBasedSplitStrategy implements SplitStrategy {
   };
 
   split(task: Task): Task[] {
-    const roles = this.roleFlows[task.role] || ['task-analyzer', 'backend-dev'];
+    const roles = this.roleFlows[task.role] || ['product-manager', 'backend-dev'];
 
     return roles.map((role, index) => ({
       id: generateId(),
@@ -719,7 +719,7 @@ data/artifacts/task-{id}/
 
 ```
 data/roles/
-├── task-analyzer.json
+├── task-master.json
 ├── product-manager.json
 ├── architect.json
 ├── backend-dev.json
@@ -788,7 +788,7 @@ class RoleMatcher {
       }
     }
 
-    return 'task-analyzer'; // 默认角色
+    return 'task-master'; // 默认角色（v10 分析由主控承担）
   }
 }
 ```
@@ -949,7 +949,7 @@ data/
 │   └── agent-context/          # 智能体上下文
 │
 └── roles/                      # 角色定义 (02-02 Agent Domain)
-    ├── task-analyzer.json
+    ├── task-master.json
     ├── product-manager.json
     └── ...
 ```

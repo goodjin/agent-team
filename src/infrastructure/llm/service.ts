@@ -73,6 +73,12 @@ export class LLMService {
     return this.defaultProvider;
   }
 
+  getAdapterMeta(provider?: string) {
+    const name = provider || this.defaultProvider;
+    const adapter = this.adapters.get(name);
+    return adapter?.getMeta ? adapter.getMeta() : undefined;
+  }
+
   /**
    * 检查指定提供商是否可用
    */

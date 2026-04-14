@@ -4,18 +4,12 @@ import {
   ITaskRepository,
   TaskStateMachine,
   InvalidStateTransitionError,
-  ComplexityAnalyzer,
-  DependencyManager,
-  ISplitStrategy,
-  RoleBasedSplitStrategy,
-  ModuleBasedSplitStrategy
 } from '../../domain/task/index.js';
-import { IEventBus, DomainEvent } from '../../infrastructure/event-bus/index.js';
+import { IEventBus } from '../../infrastructure/event-bus/index.js';
 import { ILogger, LogEntry } from '../../infrastructure/logger/index.js';
-import { IScheduler } from '../../infrastructure/scheduler/index.js';
 import { generateId } from '../../infrastructure/utils/id.js';
-import { AgentService } from '../agent/agent.service.js';
 import { MasterAgentService } from '../master-agent/master-agent.service.js';
+import { ensureTaskWorkspaceLayout } from '../bootstrap/ensure-workspace-layout.js';
 
 export class TaskNotFoundError extends Error {
   constructor(taskId: string) {
@@ -33,37 +27,36 @@ export class DependenciesNotMetError extends Error {
 
 export class TaskService {
   private stateMachine = new TaskStateMachine();
-  private complexityAnalyzer = new ComplexityAnalyzer();
-  private dependencyManager = new DependencyManager();
 
   constructor(
     private taskRepo: ITaskRepository,
     private eventBus: IEventBus,
     private logger: ILogger,
-    private scheduler: IScheduler,
-    private agentService: AgentService,
     private masterAgentService: MasterAgentService
   ) {}
 
   async create(params: CreateTaskParams): Promise<Task> {
     const title = (params.title && String(params.title).trim()) || '新对话';
     const description = params.description != null ? String(params.description) : '';
+    // 系统已统一为主控编排：忽略/覆盖任何非 v10 的入参，避免再次进入传统一键执行路径
+    const orchestrationMode: Task['orchestrationMode'] = 'v10-master';
     const task: Task = {
       id: generateId(),
       title,
       description,
       status: 'pending',
-      role: params.role || 'task-analyzer',
+      role: params.role || 'task-master',
       parentId: params.parentId,
       dependencies: params.dependencies || [],
       createdAt: new Date(),
       artifactIds: [],
       logIds: [],
       subtaskIds: [],
-      orchestrationMode: params.orchestrationMode,
+      orchestrationMode,
     };
 
     await this.taskRepo.save(task);
+    await ensureTaskWorkspaceLayout(task.id).catch(() => {});
 
     await this.logTaskEvent(task.id, 'status_change', `任务创建: ${task.title}`, {
       status: 'pending'
@@ -120,27 +113,19 @@ export class TaskService {
       payload: { taskId, oldStatus: 'pending', newStatus: 'running' }
     });
 
-    const mode = task.orchestrationMode ?? 'v9-legacy';
-    if (mode === 'v10-master') {
-      await this.masterAgentService.ensureSessionStarted(taskId);
-      await this.logTaskEvent(task.id, 'milestone', 'v10 主控会话已启动（intake），等待用户通过 WS/REST 发消息', {});
-      return;
+    if (task.orchestrationMode !== 'v10-master') {
+      const previousMode = task.orchestrationMode;
+      task.orchestrationMode = 'v10-master';
+      await this.taskRepo.save(task);
+      await this.logTaskEvent(task.id, 'milestone', '任务已升级为 v10 主控编排（传统模式已停用）', {
+        previousMode,
+      });
     }
 
-    // 分析复杂度并可能拆分
-    const complexity = this.complexityAnalyzer.analyze(task);
-    await this.logTaskEvent(task.id, 'thought', `任务复杂度分析: ${complexity.level}`, {
-      score: complexity.score
-    });
-
-    if (complexity.level !== 'simple' && complexity.strategy) {
-      await this.splitTask(task.id, complexity.strategy);
-    }
-
-    // 调度执行
-    this.scheduler.schedule(taskId, async () => {
-      await this.execute(task.id);
-    });
+    await this.masterAgentService.ensureSessionStarted(taskId);
+    await ensureTaskWorkspaceLayout(taskId).catch(() => {});
+    await this.logTaskEvent(task.id, 'milestone', 'v10 主控会话已启动（intake），等待用户通过 WS/REST 发消息', {});
+    return;
   }
 
   async pause(taskId: string): Promise<void> {
@@ -149,7 +134,6 @@ export class TaskService {
 
     task.status = 'paused';
     await this.taskRepo.save(task);
-    this.scheduler.pause(taskId);
 
     await this.logTaskEvent(taskId, 'status_change', '任务已暂停', {
       oldStatus: 'running',
@@ -169,7 +153,6 @@ export class TaskService {
 
     task.status = 'running';
     await this.taskRepo.save(task);
-    this.scheduler.resume(taskId);
 
     await this.logTaskEvent(taskId, 'status_change', '任务已恢复', {
       oldStatus: 'paused',
@@ -195,7 +178,10 @@ export class TaskService {
     await this.start(taskId);
   }
 
-  async complete(taskId: string): Promise<void> {
+  async complete(
+    taskId: string,
+    opts?: { masterClosingNote?: string }
+  ): Promise<void> {
     const task = await this.get(taskId);
     this.stateMachine.validateTransition(task.status, 'completed');
 
@@ -211,6 +197,14 @@ export class TaskService {
       type: 'task.status_changed',
       timestamp: new Date(),
       payload: { taskId, oldStatus: 'running', newStatus: 'completed' }
+    });
+
+    const masterClosingNote =
+      opts?.masterClosingNote != null ? String(opts.masterClosingNote).slice(0, 8000) : '';
+    await this.eventBus.publish({
+      type: 'experience.task_closure_requested',
+      timestamp: new Date(),
+      payload: { taskId, masterClosingNote },
     });
   }
 
@@ -231,113 +225,8 @@ export class TaskService {
     });
   }
 
-  async splitTask(taskId: string, strategy: 'role-based' | 'module-based' | 'step-based'): Promise<Task[]> {
-    const task = await this.get(taskId);
-
-    let splitStrategy: ISplitStrategy;
-    switch (strategy) {
-      case 'module-based':
-        splitStrategy = new ModuleBasedSplitStrategy();
-        break;
-      default:
-        splitStrategy = new RoleBasedSplitStrategy();
-    }
-
-    const subtaskData = splitStrategy.split(task);
-    const subtasks: Task[] = [];
-
-    for (const data of subtaskData) {
-      const subtask: Task = {
-        ...data,
-        createdAt: new Date(),
-        artifactIds: [],
-        logIds: [],
-        subtaskIds: []
-      };
-
-      await this.taskRepo.save(subtask);
-      subtasks.push(subtask);
-
-      await this.logTaskEvent(taskId, 'action', `创建子任务: ${subtask.title}`, {
-        subtaskId: subtask.id,
-        role: subtask.role
-      });
-    }
-
-    // 更新父任务的子任务列表
-    task.subtaskIds = subtasks.map(s => s.id);
-    await this.taskRepo.save(task);
-
-    await this.eventBus.publish({
-      type: 'task.split',
-      timestamp: new Date(),
-      payload: { taskId, subtasks }
-    });
-
-    return subtasks;
-  }
-
   async getSubtasks(taskId: string): Promise<Task[]> {
     return this.taskRepo.findByParentId(taskId);
-  }
-
-  private async execute(taskId: string): Promise<void> {
-    try {
-      const task = await this.get(taskId);
-      const subtasks = await this.getSubtasks(taskId);
-
-      if (subtasks.length > 0) {
-        // 检查循环依赖
-        if (this.dependencyManager.hasCycle(subtasks)) {
-          throw new Error('Circular dependency detected in subtasks');
-        }
-
-        // 获取执行顺序
-        const executionOrder = this.dependencyManager.getExecutionOrder(subtasks);
-
-        for (const level of executionOrder) {
-          // 同层任务并行执行
-          await Promise.all(level.map(st => this.executeSubtask(st)));
-        }
-      } else {
-        // 无子任务，直接执行
-        await this.executeDirectly(task);
-      }
-
-      // 汇总结果
-      await this.logTaskEvent(taskId, 'milestone', '任务执行完成，汇总结果', {});
-
-      // 标记完成
-      await this.complete(taskId);
-    } catch (error) {
-      await this.fail(taskId, String(error));
-    }
-  }
-
-  private async executeSubtask(subtask: Task): Promise<void> {
-    await this.logTaskEvent(subtask.id, 'action', `开始执行子任务: ${subtask.title}`, {
-      role: subtask.role
-    });
-
-    const agent = await this.agentService.createAgent(subtask.id, subtask.role);
-    try {
-      await this.agentService.execute(agent.id, subtask);
-    } catch (err) {
-      await this.fail(subtask.id, String(err));
-      throw err;
-    }
-
-    await this.complete(subtask.id);
-  }
-
-  private async executeDirectly(task: Task): Promise<void> {
-    await this.logTaskEvent(task.id, 'action', '开始直接执行任务', {
-      role: task.role
-    });
-
-    // 为任务创建Agent并执行
-    const agent = await this.agentService.createAgent(task.id, task.role);
-    await this.agentService.execute(agent.id, task);
   }
 
   private async logTaskEvent(taskId: string, type: LogEntry['type'], content: string, metadata: any): Promise<void> {

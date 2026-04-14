@@ -7,6 +7,8 @@ export interface TimelineEntry {
   description: string;
   details: any;
   level: LogEntry['level'];
+  type?: LogEntry['type'];
+  category?: 'llm' | 'tool' | 'other';
 }
 
 export class LogService {
@@ -19,7 +21,7 @@ export class LogService {
   async getTimeline(taskId: string, options?: QueryOptions): Promise<TimelineEntry[]> {
     const logs = await this.logger.query(taskId, {
       ...options,
-      order: options?.order ?? 'asc',
+      order: options?.order ?? 'desc',
     });
 
     return logs.map(log => ({
@@ -27,6 +29,7 @@ export class LogService {
       timestamp: log.timestamp,
       icon: this.getIconForType(log.type),
       type: log.type,
+      category: this.getCategoryForType(log.type),
       description: log.content,
       details: log.metadata,
       level: log.level
@@ -39,6 +42,8 @@ export class LogService {
 
   private getIconForType(type: LogEntry['type']): string {
     const icons: Record<string, string> = {
+      'llm_request': '🧠',
+      'llm_response': '🧾',
       'thought': '💭',
       'action': '⚡',
       'tool_call': '🔧',
@@ -48,5 +53,11 @@ export class LogService {
       'error': '❌'
     };
     return icons[type] || '📝';
+  }
+
+  private getCategoryForType(type: LogEntry['type']): TimelineEntry['category'] {
+    if (type === 'llm_request' || type === 'llm_response') return 'llm';
+    if (type === 'tool_call' || type === 'tool_result') return 'tool';
+    return 'other';
   }
 }

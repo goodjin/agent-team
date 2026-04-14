@@ -12,6 +12,8 @@ import { generateId } from '../../infrastructure/utils/id.js';
 import type { OrchestratorService } from '../orchestration/orchestrator.service.js';
 import type { ContextCompressor } from '../memory/context-compressor.js';
 import type { MemoryToolHandlers } from '../memory/memory-tool-handlers.js';
+import type { ToolRegistry } from '../../domain/tool/index.js';
+import type { TaskService } from '../task/task.service.js';
 import { MasterToolExecutor, MASTER_TOOL_DEFINITIONS } from './master-tool-executor.js';
 import { formatLLMProviderError, llmErrorMetadata } from '../../infrastructure/llm/error-format.js';
 import { splitThinkingAndVisible } from '../../infrastructure/utils/chat-sanitize.js';
@@ -44,7 +46,8 @@ export class MasterAgentService {
     private roleRepo: IRoleRepository,
     private orchestrator: OrchestratorService,
     private contextCompressor: ContextCompressor,
-    memoryHandlers: MemoryToolHandlers
+    memoryHandlers: MemoryToolHandlers,
+    toolRegistry: ToolRegistry
   ) {
     this.toolExecutor = new MasterToolExecutor(
       agentRepo,
@@ -53,24 +56,23 @@ export class MasterAgentService {
       eventBus,
       wsManager,
       memoryHandlers,
-      this.logger
+      this.logger,
+      toolRegistry
     );
   }
 
+  /** TaskService 构造完成后注入，以注册 complete_task 等依赖任务状态的工具 */
+  attachTaskService(taskService: TaskService): void {
+    this.toolExecutor.attachTaskService(taskService);
+  }
+
   /**
-   * 确保主控 Agent 与会话存在。遗留 v9 任务在可安全切换时升级为 v10-master（传统模式且执行中则拒绝，避免双轨执行）。
+   * 确保主控 Agent 与会话存在（系统已统一 v10-master）。
    */
   async ensureSessionStarted(taskId: string): Promise<void> {
     const task = await this.taskRepo.findById(taskId);
     if (!task) {
       return;
-    }
-
-    const mode = task.orchestrationMode ?? 'v9-legacy';
-    if (mode === 'v9-legacy' && task.status === 'running') {
-      throw new Error(
-        '任务正以传统模式执行中，请待执行结束后再使用主控对话'
-      );
     }
 
     if (task.orchestrationMode !== 'v10-master') {
@@ -111,21 +113,44 @@ export class MasterAgentService {
     await this.taskRepo.save(task);
   }
 
-  /** 返回主控与用户/助手的对话历史（用于前端恢复会话） */
-  async getConversation(taskId: string): Promise<{ messages: Array<{ role: string; content: string }> }> {
+  /**
+   * 主控会话分页：默认返回末尾 `limit` 条；`before` 为在完整历史中的**切片右端下标**（不包含），用于向上翻更早的 50 条。
+   */
+  async getConversation(
+    taskId: string,
+    opts?: { limit?: number; before?: number }
+  ): Promise<{
+    messages: Array<{ role: string; content: string }>;
+    total: number;
+    hasOlder: boolean;
+    oldestIndex: number;
+  }> {
     const task = await this.taskRepo.findById(taskId);
     if (!task?.masterAgentId) {
-      return { messages: [] };
+      return { messages: [], total: 0, hasOlder: false, oldestIndex: 0 };
     }
     const agent = await this.agentRepo.findById(task.masterAgentId);
     if (!agent) {
-      return { messages: [] };
+      return { messages: [], total: 0, hasOlder: false, oldestIndex: 0 };
     }
+    const all = agent.context.history.map((h) => ({
+      role: h.role,
+      content: h.content,
+    }));
+    const total = all.length;
+    const limit = Math.min(100, Math.max(1, opts?.limit ?? 50));
+    const beforeOpt = opts?.before;
+    const end =
+      typeof beforeOpt === 'number' && Number.isFinite(beforeOpt)
+        ? Math.max(0, Math.min(total, beforeOpt))
+        : total;
+    const start = Math.max(0, end - limit);
+    const messages = all.slice(start, end);
     return {
-      messages: agent.context.history.map((h) => ({
-        role: h.role,
-        content: h.content,
-      })),
+      messages,
+      total,
+      hasOlder: start > 0,
+      oldestIndex: start,
     };
   }
 
@@ -185,11 +210,51 @@ export class MasterAgentService {
     for (let turn = 0; turn < MasterAgentService.MAX_TOOL_TURNS; turn++) {
       let response;
       try {
+        const provider = this.llmService.getDefaultProvider();
+        const meta = this.llmService.getAdapterMeta(provider);
+        const endpoint =
+          meta?.providerType === 'openai'
+            ? `${meta.baseURL ?? 'https://api.openai.com/v1'}/chat/completions`
+            : 'https://api.anthropic.com/v1/messages';
+        await this.logger.log({
+          timestamp: new Date(),
+          level: 'debug',
+          taskId,
+          agentId: agent.id,
+          type: 'llm_request',
+          content: 'Master LLM 请求',
+          metadata: {
+            turn,
+            provider,
+            model: meta?.model,
+            url: endpoint,
+            messages: messages.length,
+            tools: MASTER_TOOL_DEFINITIONS.map((t) => t.name),
+            preview: summarizeMessagesForLog(messages, { tail: 8, maxChars: 420 }),
+          },
+        });
         response = await this.llmService.chatDefault({
           messages,
           tools: MASTER_TOOL_DEFINITIONS,
           temperature: 0.5,
           maxTokens: 4096,
+        });
+        await this.logger.log({
+          timestamp: new Date(),
+          level: 'debug',
+          taskId,
+          agentId: agent.id,
+          type: 'llm_response',
+          content: 'Master LLM 响应',
+          metadata: {
+            turn,
+            provider,
+            model: meta?.model,
+            url: endpoint,
+            usage: response.usage,
+            toolCalls: msgToolCallsCount(response.message),
+            responsePreview: summarizeAssistantMessageForLog(response.message, { maxChars: 1200 }),
+          },
         });
       } catch (llmErr) {
         const detail = formatLLMProviderError(llmErr);
@@ -292,4 +357,100 @@ export class MasterAgentService {
     });
     return fallback;
   }
+
+  /**
+   * 工人执行结果写入主控会话（user + 固定前缀），主控下一轮可见；前端通过 WS 刷新对话。
+   */
+  async appendWorkerProgressFeed(
+    taskId: string,
+    payload: {
+      taskId: string;
+      workerId: string;
+      kind: string;
+      correlationId?: string;
+      detail?: Record<string, unknown>;
+    }
+  ): Promise<void> {
+    if (payload.kind !== 'COMPLETED' && payload.kind !== 'FAILED') return;
+    await this.ensureSessionStarted(taskId);
+    const task = await this.taskRepo.findById(taskId);
+    if (!task?.masterAgentId) return;
+    const agent = await this.agentRepo.findById(task.masterAgentId);
+    if (!agent) return;
+
+    const worker = await this.agentRepo.findById(payload.workerId);
+    const label = worker?.displayName || worker?.roleId || payload.workerId.slice(0, 8);
+    const nodeId = payload.detail?.nodeId != null ? String(payload.detail.nodeId) : '';
+    const err = payload.detail?.error != null ? String(payload.detail.error) : '';
+    const lines = [
+      `[系统·工人汇报] 「${label}」（${payload.workerId}）`,
+      `${payload.kind === 'COMPLETED' ? '✅ 本轮工人执行已完成' : '❌ 本轮工人执行失败'}${nodeId ? ` · DAG 节点 ${nodeId}` : ''}`,
+      err ? `原因/说明：${err.slice(0, 4000)}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    agent.context.history.push({ role: 'user', content: lines });
+    await this.contextCompressor.maybeCompressMasterHistory(agent);
+    await this.agentRepo.save(agent);
+
+    await this.eventBus.publish({
+      type: 'master.message.appended',
+      timestamp: new Date(),
+      payload: { taskId, role: 'user', contentLength: lines.length, source: 'worker_feed' },
+    });
+    this.wsManager.broadcast(taskId, {
+      type: 'master_conversation_updated',
+      timestamp: new Date().toISOString(),
+      data: { reason: 'worker_progress', workerId: payload.workerId, kind: payload.kind },
+    });
+  }
+}
+
+function msgToolCallsCount(msg: { toolCalls?: unknown[] } | null | undefined): number {
+  const tc = msg && Array.isArray((msg as any).toolCalls) ? (msg as any).toolCalls : [];
+  return Array.isArray(tc) ? tc.length : 0;
+}
+
+function truncateForLog(input: unknown, maxChars: number): string {
+  const s = typeof input === 'string' ? input : JSON.stringify(input);
+  if (!s) return '';
+  const out = s.length > maxChars ? `${s.slice(0, maxChars)}…(truncated)` : s;
+  // 轻度脱敏：常见 key/token 形态
+  return out
+    .replace(/(sk-[A-Za-z0-9]{10,})/g, 'sk-***redacted***')
+    .replace(/(Bearer\\s+)[A-Za-z0-9._-]{10,}/gi, '$1***redacted***')
+    .replace(/(api[_-]?key\"?\\s*[:=]\\s*\")([^\"\\n]{6,})/gi, '$1***redacted***');
+}
+
+function summarizeMessagesForLog(
+  messages: Array<{ role: string; content: string }>,
+  opts: { tail: number; maxChars: number }
+): Array<{ role: string; contentPreview: string; length: number }> {
+  const tail = Math.max(0, opts.tail);
+  const slice = tail ? messages.slice(-tail) : messages;
+  return slice.map((m) => ({
+    role: m.role,
+    length: (m.content || '').length,
+    contentPreview: truncateForLog(m.content || '', opts.maxChars),
+  }));
+}
+
+function summarizeAssistantMessageForLog(
+  msg: any,
+  opts: { maxChars: number }
+): { contentPreview: string; toolCalls?: Array<{ name: string; argumentsPreview?: string }> } {
+  const toolCalls = Array.isArray(msg?.toolCalls) ? msg.toolCalls : [];
+  const tcPreview =
+    toolCalls.length > 0
+      ? toolCalls.slice(0, 8).map((tc: any) => ({
+          name: String(tc?.name ?? ''),
+          argumentsPreview:
+            tc?.arguments != null ? truncateForLog(tc.arguments, 800) : undefined,
+        }))
+      : undefined;
+  return {
+    contentPreview: truncateForLog(msg?.content || '', opts.maxChars),
+    toolCalls: tcPreview,
+  };
 }

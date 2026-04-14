@@ -36,24 +36,41 @@ Agent Team 是一个创新的多智能体项目管理系统，通过定义不同
 
 ```bash
 npm install
-```
-
-### 开发模式
-
-```bash
-npm run dev
+npm install --prefix public-react
 ```
 
 ### 构建
 
 ```bash
-npm run build
+npm run build          # 后端 TypeScript → dist/
+npm run build:web      # 前端 React（Vite）→ public-react/dist/
+npm run build:all      # 以上两条依次执行
 ```
 
-### 启动服务
+### 启动服务（默认 http://localhost:3000）
 
 ```bash
-npm start
+npm run build:web   # 首次或改完前端后执行
+npm run server      # 开发：tsx 直接跑源码
+```
+
+生产可用 `npm start`（`prestart` 会自动执行 `build:web`）。
+
+### 仅开发前端（热更新，接口仍走本机 3000）
+
+```bash
+# 终端 1
+npm run server
+
+# 终端 2
+cd public-react && npm run dev
+# 浏览器打开 http://localhost:5173（Vite 代理 /api、/ws → 3000）
+```
+
+### 后端 watch（不含前端）
+
+```bash
+npm run dev
 ```
 
 ### CLI 交互

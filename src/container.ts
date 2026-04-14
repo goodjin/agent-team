@@ -1,7 +1,6 @@
 import * as path from 'path';
 import { FileStore, IFileStore } from './infrastructure/file-store/index.js';
 import { EventBus, IEventBus } from './infrastructure/event-bus/index.js';
-import { Scheduler, IScheduler } from './infrastructure/scheduler/index.js';
 import { WebSocketManager } from './infrastructure/websocket/index.js';
 import { BatchLogger, ILogger } from './infrastructure/logger/index.js';
 import {
@@ -20,12 +19,19 @@ import { WorkerRunner } from './application/orchestration/worker-runner.js';
 import { ToolRegistry, builtinTools } from './domain/tool/index.js';
 import { TaskService } from './application/task/task.service.js';
 import { MasterAgentService } from './application/master-agent/master-agent.service.js';
+import { MasterFollowUpScheduler } from './application/master-agent/master-follow-up-scheduler.js';
 import { LogService } from './application/log/log.service.js';
 import { ArtifactService } from './application/artifact/artifact.service.js';
 import { AgentService } from './application/agent/agent.service.js';
 import { AgentExecutionEngine, type AgentExecutionFinishedPayload } from './application/agent/execution-engine.js';
 import { APIGateway } from './application/api/gateway.js';
+import { PostmortemService } from './application/ops/postmortem.service.js';
+import { ExperienceCuratorService } from './application/experience/experience-curator.service.js';
+import { ReviewGateService } from './application/review/review-gate.service.js';
+import { ReviewRoleMappingStore } from './application/review/review-role-mapping.store.js';
 import { registerPluginToolsOnRegistry } from './application/bootstrap/plugin-tools.js';
+import { seedRolesFromProjectSkills } from './application/bootstrap/seed-roles-from-project-skills.js';
+import { seedSystemRoles } from './application/bootstrap/seed-system-roles.js';
 import { SelfEvaluator } from './evolution/evaluator.js';
 import { PromptOptimizer } from './evolution/prompt-optimizer.js';
 import { AgentMemory } from './knowledge/agent-memory.js';
@@ -44,7 +50,6 @@ export type { AgentExecutionFinishedPayload };
 export interface Container {
   fileStore: IFileStore;
   eventBus: IEventBus;
-  scheduler: IScheduler;
   wsManager: WebSocketManager;
   logger: ILogger;
   llmService: LLMService;
@@ -71,12 +76,13 @@ export interface Container {
   /** 插件加载器（若启动成功） */
   pluginLoader: PluginLoader | null;
   dynamicToolLoader: DynamicToolLoader | null;
+  /** 主控定时跟进（需调用 start()，见 index.ts） */
+  masterFollowUpScheduler: MasterFollowUpScheduler;
 }
 
 export async function createContainer(dataPath: string = './data'): Promise<Container> {
   const fileStore = new FileStore(dataPath);
   const eventBus = new EventBus();
-  const scheduler = new Scheduler(10);
   const wsManager = new WebSocketManager();
   const logger = new BatchLogger(fileStore);
 
@@ -144,6 +150,26 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
     console.log(`[plugins] Tool plugins registered: ${names.length ? names.join(', ') : '(none)'}`);
   } catch (err) {
     console.warn('[plugins] Failed to load plugin tools:', err);
+  }
+
+  try {
+    const seeded = await seedRolesFromProjectSkills({ roleRepo, toolRegistry });
+    if (seeded.created > 0) {
+      console.log(
+        `[roles] Seeded roles from project roles/claude-skills: ${seeded.created} created, ${seeded.skipped} skipped`
+      );
+    }
+  } catch (err) {
+    console.warn('[roles] Failed to seed roles from project roles/claude-skills:', err);
+  }
+
+  try {
+    const sys = await seedSystemRoles({ roleRepo });
+    if (sys.experienceArchivist === 'created') {
+      console.log('[roles] Seeded system role: experience-archivist');
+    }
+  } catch (err) {
+    console.warn('[roles] Failed to seed system roles:', err);
   }
 
   const agentMemory = new AgentMemory({
@@ -262,20 +288,66 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
     roleRepo,
     orchestratorService,
     contextCompressor,
-    memoryToolHandlers
+    memoryToolHandlers,
+    toolRegistry
   );
 
-  const taskService = new TaskService(
+  const masterFollowUpScheduler = new MasterFollowUpScheduler({
     taskRepo,
-    eventBus,
+    masterAgentService,
     logger,
-    scheduler,
-    agentService,
-    masterAgentService
-  );
+  });
+
+  eventBus.subscribe('worker.to.master.progress', async (event) => {
+    const p = event.payload as {
+      taskId: string;
+      workerId: string;
+      kind: string;
+      correlationId?: string;
+      detail?: Record<string, unknown>;
+    };
+    if (!p?.taskId || !p.workerId) return;
+    try {
+      await masterAgentService.appendWorkerProgressFeed(p.taskId, p);
+    } catch (e) {
+      console.error('[worker.to.master.progress] ingest:', e);
+    }
+  });
+
+  const taskService = new TaskService(taskRepo, eventBus, logger, masterAgentService);
+  masterAgentService.attachTaskService(taskService);
 
   const logService = new LogService(logger);
   const artifactService = new ArtifactService(fileStore, eventBus);
+  const postmortemService = new PostmortemService(
+    taskService,
+    orchestratorService,
+    logService,
+    artifactService,
+    agentService
+  );
+
+  const reviewRoleMappingStore = new ReviewRoleMappingStore(fileStore);
+  const reviewGateService = new ReviewGateService(
+    taskRepo,
+    roleRepo,
+    agentRepo,
+    reviewRoleMappingStore,
+    orchestratorService,
+    llmService,
+    logger
+  );
+  reviewGateService.start(eventBus);
+
+  const experienceCurator = new ExperienceCuratorService(
+    taskRepo,
+    roleRepo,
+    masterAgentService,
+    postmortemService,
+    llmService,
+    logger
+  );
+  experienceCurator.start(eventBus);
 
   const apiGateway = new APIGateway({
     port: 3000,
@@ -287,13 +359,14 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
     wsManager,
     masterAgentService,
     roleRepo,
+    reviewRoleMappingStore,
     orchestratorService,
+    postmortemService,
   });
 
   return {
     fileStore,
     eventBus,
-    scheduler,
     wsManager,
     logger,
     llmService,
@@ -312,5 +385,6 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
     promptOptimizer,
     pluginLoader,
     dynamicToolLoader,
+    masterFollowUpScheduler,
   };
 }

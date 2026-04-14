@@ -16,6 +16,7 @@ import {
  */
 export class OpenAIAdapter implements LLMAdapter {
   private client: OpenAI;
+  private baseURL?: string;
 
   constructor(
     apiKey: string | undefined,
@@ -25,10 +26,19 @@ export class OpenAIAdapter implements LLMAdapter {
     if (!apiKey) {
       throw new Error('OpenAI API key is required');
     }
+    this.baseURL = baseURL || undefined;
     this.client = new OpenAI({
       apiKey,
       baseURL: baseURL || undefined // 使用自定义baseURL或默认值
     });
+  }
+
+  getMeta() {
+    return {
+      providerType: 'openai' as const,
+      model: this.model,
+      baseURL: this.baseURL,
+    };
   }
 
   async chat(request: ChatRequest): Promise<ChatResponse> {

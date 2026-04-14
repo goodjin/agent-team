@@ -13,7 +13,7 @@
 | `POST` | `/api/tasks` | 创建任务；body 可增 `orchestrationMode: 'v10-master' \| 'v9-legacy'`（默认 v10） |
 | `GET` | `/api/tasks/:id` | 含扩展字段 `masterAgentId`, `orchestrationState`, `planVersion` |
 | `POST` | `/api/tasks/:id/master/start` | **v10**：启动主会话（intake），不自动派工 |
-| `POST` | `/api/tasks/:id/orchestration/start` | **v10**：主 Agent 已 `submit_plan` 后，调度器开始跑 DAG（可选，或由主工具内部触发） |
+| `POST` | `/api/tasks/:id/orchestration/start` | **v10**：与 `submit_plan` 成功后的自动启动逻辑相同；**正常路径无需调用**（进程重启导致内存计划丢失等排错时可手动调） |
 
 ### 1.2 角色（v10）
 

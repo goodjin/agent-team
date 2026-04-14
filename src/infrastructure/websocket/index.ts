@@ -10,6 +10,7 @@ export interface WebSocketEvent {
     | 'progress_update'
     | 'error'
     | 'master_reply'
+    | 'master_conversation_updated'
     | 'master_session'
     | 'orchestration.plan_updated'
     | 'worker.status';

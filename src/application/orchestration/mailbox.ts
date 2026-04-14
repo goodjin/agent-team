@@ -40,4 +40,16 @@ export class WorkerMailbox {
     }
     return out;
   }
+
+  /** 供操作台展示：各工人待处理指令队列（浅拷贝，不消费） */
+  snapshotQueues(workerIds: Iterable<string>): Record<string, MailboxEnvelope[]> {
+    const out: Record<string, MailboxEnvelope[]> = {};
+    for (const id of workerIds) {
+      const q = this.queues.get(id);
+      if (q?.length) {
+        out[id] = q.map((e) => ({ ...e, body: { ...e.body } }));
+      }
+    }
+    return out;
+  }
 }

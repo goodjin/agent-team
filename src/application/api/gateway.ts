@@ -1,8 +1,10 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer } from 'http';
 import { join, dirname } from 'path';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
+import path from 'path';
 import { TaskService } from '../task/task.service.js';
 import { LogService } from '../log/log.service.js';
 import { ArtifactService } from '../artifact/artifact.service.js';
@@ -13,9 +15,26 @@ import { MasterAgentService } from '../master-agent/master-agent.service.js';
 import { RoleMatcher } from '../../domain/agent/role-matcher.js';
 import type { Role } from '../../domain/agent/agent.entity.js';
 import type { IRoleRepository } from '../../domain/role/role.repository.js';
+import { isReservedSystemRoleId } from '../bootstrap/seed-system-roles.js';
 import type { OrchestratorService } from '../orchestration/orchestrator.service.js';
+import type { PostmortemService } from '../ops/postmortem.service.js';
+import type { ReviewRoleMappingStore } from '../review/review-role-mapping.store.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function resolveInWorkspaceRoot(taskId: string, relPath: string): string {
+  const root = path.resolve(process.cwd(), `data/workspaces/${taskId}`);
+  const raw = String(relPath || '').trim().replace(/\\/g, '/');
+  if (!raw) throw new Error('artifact.path empty');
+  const candidate = path.isAbsolute(raw) || /^[a-zA-Z]:\//.test(raw) || raw.startsWith('//')
+    ? path.resolve(raw)
+    : path.resolve(root, raw);
+  const rel = path.relative(root, candidate);
+  if (rel.startsWith('..') || rel.includes(`..${path.sep}`)) {
+    throw new Error(`artifact path escapes workspace (root: ${root})`);
+  }
+  return candidate;
+}
 
 export interface APIGatewayOptions {
   port: number;
@@ -27,7 +46,9 @@ export interface APIGatewayOptions {
   wsManager: WebSocketManager;
   masterAgentService: MasterAgentService;
   roleRepo: IRoleRepository;
+  reviewRoleMappingStore: ReviewRoleMappingStore;
   orchestratorService: OrchestratorService;
+  postmortemService: PostmortemService;
 }
 
 export class APIGateway {
@@ -43,8 +64,12 @@ export class APIGateway {
   private wsManager: WebSocketManager;
   private masterAgentService: MasterAgentService;
   private roleRepo: IRoleRepository;
+  private reviewRoleMappingStore: ReviewRoleMappingStore;
   private orchestratorService: OrchestratorService;
+  private postmortemService: PostmortemService;
   private roleMatcher = new RoleMatcher();
+  /** 构建后的 React 单页资源目录（vite build → public-react/dist） */
+  private readonly reactDistDir = join(__dirname, '../../../public-react/dist');
 
   constructor(options: APIGatewayOptions) {
     this.port = options.port;
@@ -56,7 +81,9 @@ export class APIGateway {
     this.wsManager = options.wsManager;
     this.masterAgentService = options.masterAgentService;
     this.roleRepo = options.roleRepo;
+    this.reviewRoleMappingStore = options.reviewRoleMappingStore;
     this.orchestratorService = options.orchestratorService;
+    this.postmortemService = options.postmortemService;
 
     this.app = express();
     this.server = createServer(this.app);
@@ -78,15 +105,76 @@ export class APIGateway {
   }
 
   private setupStaticFiles(): void {
-    // 静态文件目录
-    const publicDir = join(__dirname, '../../../public');
-    this.app.use(express.static(publicDir));
+    if (existsSync(this.reactDistDir)) {
+      this.app.use(express.static(this.reactDistDir));
+      console.log(`[APIGateway] Web UI (React): ${this.reactDistDir}`);
+    } else {
+      console.warn(
+        '[APIGateway] Web UI missing: public-react/dist not found. Run: npm install --prefix public-react && npm run build:web'
+      );
+    }
   }
 
   private setupRoutes(): void {
     // Health check
     this.app.get('/api/health', (req: Request, res: Response) => {
       res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    });
+
+    // Tools（供角色管理按类别勾选 allowedTools）
+    this.app.get('/api/tools', async (req: Request, res: Response) => {
+      const tools = this.agentService.getToolRegistry().list().map((t) => ({
+        name: t.name,
+        category: t.category,
+        dangerous: t.dangerous,
+        description: t.description,
+      }));
+      res.json(tools);
+    });
+
+    /** 质量门禁：工人角色 → 审查员角色映射（持久化于 data/config/review-role-mapping.json） */
+    this.app.get('/api/config/review-role-mapping', async (_req: Request, res: Response) => {
+      const cfg = await this.reviewRoleMappingStore.get();
+      res.json(cfg);
+    });
+
+    this.app.put('/api/config/review-role-mapping', async (req: Request, res: Response) => {
+      try {
+        const b = req.body as Record<string, unknown>;
+        const def =
+          typeof b.defaultReviewerRoleId === 'string' ? b.defaultReviewerRoleId.trim() : '';
+        const rtr = b.roleToReviewer;
+        if (!def) {
+          res.status(400).json({ error: 'defaultReviewerRoleId required' });
+          return;
+        }
+        if (!rtr || typeof rtr !== 'object' || Array.isArray(rtr)) {
+          res.status(400).json({ error: 'roleToReviewer must be an object' });
+          return;
+        }
+        const roleToReviewer: Record<string, string> = {};
+        for (const [k, v] of Object.entries(rtr as Record<string, unknown>)) {
+          const kk = String(k || '').trim();
+          const vv = typeof v === 'string' ? v.trim() : String(v ?? '').trim();
+          if (!kk || !vv) continue;
+          roleToReviewer[kk] = vv;
+        }
+        const known = await this.collectAllRoleIds();
+        const unknown: string[] = [];
+        if (!known.has(def)) unknown.push(`defaultReviewer:${def}`);
+        for (const [w, rev] of Object.entries(roleToReviewer)) {
+          if (!known.has(w)) unknown.push(`workerRole:${w}`);
+          if (!known.has(rev)) unknown.push(`reviewerRole:${rev}`);
+        }
+        if (unknown.length > 0) {
+          res.status(400).json({ error: 'UNKNOWN_ROLE_ID', unknown });
+          return;
+        }
+        await this.reviewRoleMappingStore.save({ defaultReviewerRoleId: def, roleToReviewer });
+        res.json(await this.reviewRoleMappingStore.get());
+      } catch (error) {
+        res.status(400).json({ error: String(error) });
+      }
     });
 
     // Roles（内置 + 持久化合并；同 id 时持久化覆盖）
@@ -120,6 +208,10 @@ export class APIGateway {
           res.status(400).json({ error: 'id, name, systemPrompt required' });
           return;
         }
+        if (isReservedSystemRoleId(String(b.id).trim())) {
+          res.status(403).json({ error: 'RESERVED_ROLE_ID' });
+          return;
+        }
         const role: Role = {
           id: b.id,
           name: b.name,
@@ -134,6 +226,76 @@ export class APIGateway {
         };
         await this.roleRepo.save(role);
         res.status(201).json(role);
+      } catch (error) {
+        res.status(400).json({ error: String(error) });
+      }
+    });
+
+    /** 更新角色（主要用于修改 systemPrompt）。同 id 时写入持久化层，覆盖内置显示。 */
+    this.app.put('/api/roles/:id', async (req: Request, res: Response) => {
+      try {
+        const id = String(req.params.id || '').trim();
+        if (!id) {
+          res.status(400).json({ error: 'id required' });
+          return;
+        }
+        const existingCustom = await this.roleRepo.findById(id);
+        const builtin = this.roleMatcher.getBuiltinRole(id);
+        const base = existingCustom ?? builtin;
+        if (!base) {
+          res.status(404).json({ error: 'ROLE_NOT_FOUND' });
+          return;
+        }
+
+        const b = (req.body ?? {}) as Record<string, unknown>;
+        const systemLocked =
+          isReservedSystemRoleId(id) || !!(existingCustom?.isSystem ?? base.isSystem);
+        const next: Role = {
+          id,
+          name: typeof b.name === 'string' ? b.name : base.name,
+          description: typeof b.description === 'string' ? b.description : base.description,
+          systemPrompt: typeof b.systemPrompt === 'string' ? b.systemPrompt : base.systemPrompt,
+          allowedTools: Array.isArray(b.allowedTools)
+            ? (b.allowedTools as unknown[]).filter((x): x is string => typeof x === 'string')
+            : base.allowedTools,
+          maxTokensPerTask: typeof b.maxTokensPerTask === 'number' ? b.maxTokensPerTask : base.maxTokensPerTask,
+          temperature: typeof b.temperature === 'number' ? b.temperature : base.temperature,
+          timeout: typeof b.timeout === 'number' ? b.timeout : base.timeout,
+        };
+        if (systemLocked) {
+          next.isSystem = true;
+        }
+
+        if (!next.name || !next.systemPrompt) {
+          res.status(400).json({ error: 'name and systemPrompt must be non-empty' });
+          return;
+        }
+
+        await this.roleRepo.save(next);
+        res.json(next);
+      } catch (error) {
+        res.status(400).json({ error: String(error) });
+      }
+    });
+
+    this.app.delete('/api/roles/:id', async (req: Request, res: Response) => {
+      try {
+        const id = String(req.params.id || '').trim();
+        if (!id) {
+          res.status(400).json({ error: 'id required' });
+          return;
+        }
+        const existing = await this.roleRepo.findById(id);
+        if (!existing) {
+          res.status(404).json({ error: 'ROLE_NOT_FOUND' });
+          return;
+        }
+        if (existing.isSystem || isReservedSystemRoleId(id)) {
+          res.status(403).json({ error: 'SYSTEM_ROLE_NOT_DELETABLE' });
+          return;
+        }
+        await this.roleRepo.delete(id);
+        res.json({ success: true });
       } catch (error) {
         res.status(400).json({ error: String(error) });
       }
@@ -187,6 +349,19 @@ export class APIGateway {
     this.app.post('/api/tasks/:id/resume', async (req: Request, res: Response) => {
       try {
         await this.taskService.resume(req.params.id);
+        res.json({ success: true });
+      } catch (error) {
+        res.status(400).json({ error: String(error) });
+      }
+    });
+
+    this.app.post('/api/tasks/:id/complete', async (req: Request, res: Response) => {
+      try {
+        const note =
+          req.body && typeof req.body === 'object' && typeof (req.body as { closing_note?: string }).closing_note === 'string'
+            ? (req.body as { closing_note: string }).closing_note
+            : '';
+        await this.taskService.complete(req.params.id, { masterClosingNote: note });
         res.json({ success: true });
       } catch (error) {
         res.status(400).json({ error: String(error) });
@@ -275,16 +450,44 @@ export class APIGateway {
         }
 
         const fs = await import('fs/promises');
-        const path = await import('path');
+        const fullPath = resolveInWorkspaceRoot(artifact.taskId, artifact.path);
 
-        // 解析完整路径：artifact.path 可能是相对路径，需要结合工作目录
-        const fullPath = path.resolve(process.cwd(), `data/workspaces/${artifact.taskId}`, artifact.path);
-
+        const isText =
+          (artifact.mimeType && artifact.mimeType.startsWith('text/')) ||
+          /json|xml|yaml|yml|markdown/i.test(artifact.mimeType || '') ||
+          /\.(txt|md|js|ts|jsx|tsx|css|html|json|yaml|yml|xml|sh|py|go|rs)$/i.test(artifact.name || '');
+        if (!isText) {
+          res.status(415).json({ error: 'Binary preview not supported in /content; use /raw', artifact });
+          return;
+        }
         const content = await fs.readFile(fullPath, 'utf-8');
         res.json({ content, artifact });
       } catch (error) {
         console.error('Failed to read artifact content:', error);
         res.status(500).json({ error: 'Failed to read file content' });
+      }
+    });
+
+    // 原样输出成品（用于图片/PDF等内联预览；不强制下载）
+    this.app.get('/api/artifacts/:id/raw', async (req: Request, res: Response) => {
+      try {
+        const artifact = await this.artifactService.getById(req.params.id);
+        if (!artifact) {
+          res.status(404).json({ error: 'Artifact not found' });
+          return;
+        }
+        const fs = await import('fs');
+        const fullPath = resolveInWorkspaceRoot(artifact.taskId, artifact.path);
+        if (!fs.existsSync(fullPath)) {
+          res.status(404).json({ error: 'File not found' });
+          return;
+        }
+        if (artifact.mimeType) res.setHeader('Content-Type', artifact.mimeType);
+        res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(artifact.name)}"`);
+        fs.createReadStream(fullPath).pipe(res);
+      } catch (error) {
+        console.error('Failed to stream artifact raw:', error);
+        res.status(500).json({ error: 'Failed to stream file' });
       }
     });
 
@@ -298,10 +501,7 @@ export class APIGateway {
         }
 
         const fs = await import('fs');
-        const path = await import('path');
-
-        // 解析完整路径
-        const fullPath = path.resolve(process.cwd(), `data/workspaces/${artifact.taskId}`, artifact.path);
+        const fullPath = resolveInWorkspaceRoot(artifact.taskId, artifact.path);
 
         // 检查文件是否存在
         if (!fs.existsSync(fullPath)) {
@@ -330,7 +530,20 @@ export class APIGateway {
     // 主 Agent 会话：拉取历史 + 发送消息
     this.app.get('/api/tasks/:id/master/conversation', async (req: Request, res: Response) => {
       try {
-        const data = await this.masterAgentService.getConversation(req.params.id);
+        const limitRaw = req.query.limit;
+        const beforeRaw = req.query.before;
+        const limit =
+          typeof limitRaw === 'string' && limitRaw.trim()
+            ? Number.parseInt(limitRaw, 10)
+            : undefined;
+        const before =
+          typeof beforeRaw === 'string' && beforeRaw.trim()
+            ? Number.parseInt(beforeRaw, 10)
+            : undefined;
+        const data = await this.masterAgentService.getConversation(req.params.id, {
+          limit: Number.isFinite(limit) ? limit : undefined,
+          before: Number.isFinite(before) ? before : undefined,
+        });
         res.json(data);
       } catch (error) {
         res.status(400).json({ error: String(error) });
@@ -385,11 +598,59 @@ export class APIGateway {
       }
     });
 
-    // SPA fallback - 所有非 API 路由返回 index.html
+    /** 编排操作台：DAG 分层、节点状态、工人信箱队列深度与待处理指令 */
+    this.app.get('/api/tasks/:id/orchestration/snapshot', async (req: Request, res: Response) => {
+      try {
+        const taskId = req.params.id;
+        await this.taskService.get(taskId);
+        const snap = await this.orchestratorService.getSnapshot(taskId);
+        const agents = await this.agentService.getAgentsByTask(taskId);
+        const workerNames: Record<string, string> = {};
+        for (const a of agents) {
+          workerNames[a.id] = a.displayName ?? a.roleId ?? a.id;
+        }
+        res.json({
+          ...snap,
+          workerNames,
+          activePlan: snap.activePlan
+            ? {
+                ...snap.activePlan,
+                nodes: snap.activePlan.nodes.map((n) => ({
+                  ...n,
+                  workerDisplayName: workerNames[n.workerId] ?? n.workerId,
+                })),
+              }
+            : undefined,
+        });
+      } catch (error) {
+        res.status(404).json({ error: String(error) });
+      }
+    });
+
+    /** 运行摘要 / 复盘要点（现算，不落库） */
+    this.app.get('/api/tasks/:id/postmortem', async (req: Request, res: Response) => {
+      try {
+        const data = await this.postmortemService.build(req.params.id);
+        res.json(data);
+      } catch (error) {
+        res.status(404).json({ error: String(error) });
+      }
+    });
+
+    // SPA fallback - 所有非 API 路由返回 React index.html
     this.app.get('*', (req: Request, res: Response) => {
       if (!req.path.startsWith('/api')) {
-        const publicDir = join(__dirname, '../../../public');
-        res.sendFile(join(publicDir, 'index.html'));
+        const indexHtml = join(this.reactDistDir, 'index.html');
+        if (!existsSync(indexHtml)) {
+          res
+            .status(503)
+            .type('text')
+            .send(
+              'Web UI not built. From repo root run:\n  npm install --prefix public-react && npm run build:web\nThen restart the server.'
+            );
+          return;
+        }
+        res.sendFile(indexHtml);
       } else {
         res.status(404).json({ error: 'Not found' });
       }
@@ -400,6 +661,16 @@ export class APIGateway {
       console.error('Error:', err);
       res.status(500).json({ error: err.message });
     });
+  }
+
+  /** 与 GET /api/roles 一致的角色 id 集合（内置 + 持久化） */
+  private async collectAllRoleIds(): Promise<Set<string>> {
+    const custom = await this.roleRepo.list();
+    const builtin = this.agentService.getAllRoles();
+    const byId = new Set<string>();
+    for (const r of builtin) byId.add(r.id);
+    for (const r of custom) byId.add(r.id);
+    return byId;
   }
 
   private setupWebSocket(): void {

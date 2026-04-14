@@ -7,7 +7,16 @@ export interface LogEntry {
   level: 'debug' | 'info' | 'warn' | 'error';
   taskId: string;
   agentId?: string;
-  type: 'thought' | 'action' | 'tool_call' | 'tool_result' | 'milestone' | 'status_change' | 'error';
+  type:
+    | 'llm_request'
+    | 'llm_response'
+    | 'thought'
+    | 'action'
+    | 'tool_call'
+    | 'tool_result'
+    | 'milestone'
+    | 'status_change'
+    | 'error';
   content: string;
   metadata?: Record<string, any>;
 }

@@ -126,41 +126,71 @@ export class WorkerRunner {
 
       const ac = new AbortController();
       this.abortByWorker.set(workerId, ac);
+      try {
+        await this.eventBus.publish({
+          type: 'worker.to.master.progress',
+          timestamp: new Date(),
+          payload: {
+            taskId: task.id,
+            workerId,
+            kind: 'PROGRESS',
+            correlationId: item.correlationId,
+            detail: { phase: 'execute_start', nodeId },
+          },
+        });
 
-      await this.eventBus.publish({
-        type: 'worker.to.master.progress',
-        timestamp: new Date(),
-        payload: {
-          taskId: task.id,
-          workerId,
-          kind: 'PROGRESS',
-          correlationId: item.correlationId,
-          detail: { phase: 'execute_start', nodeId },
-        },
-      });
+        try {
+          await this.agentService.execute(workerId, task, { signal: ac.signal });
+        } catch (execErr) {
+          const agentErr = await this.agentRepo.findById(workerId);
+          await this.eventBus.publish({
+            type: 'worker.to.master.progress',
+            timestamp: new Date(),
+            payload: {
+              taskId: task.id,
+              workerId,
+              kind: 'FAILED' as const,
+              correlationId: item.correlationId,
+              detail: {
+                nodeId,
+                phase: 'execute_error',
+                error: agentErr?.error ?? (execErr instanceof Error ? execErr.message : String(execErr)),
+              },
+            },
+          });
+          await this.resetWorkerAgent(workerId);
+          if (nodeId) {
+            await this.orchestrator.onWorkerNodeDone(task.id, nodeId, false);
+          }
+          return;
+        }
 
-      await this.agentService.execute(workerId, task, { signal: ac.signal });
+        const agentAfter = await this.agentRepo.findById(workerId);
+        const ok = agentAfter?.status === 'completed';
 
-      const agentAfter = await this.agentRepo.findById(workerId);
-      const ok = agentAfter?.status === 'completed';
+        await this.resetWorkerAgent(workerId);
 
-      await this.resetWorkerAgent(workerId);
+        if (nodeId) {
+          await this.orchestrator.onWorkerNodeDone(task.id, nodeId, ok);
+        }
 
-      if (nodeId) {
-        await this.orchestrator.onWorkerNodeDone(task.id, nodeId, ok);
+        await this.eventBus.publish({
+          type: 'worker.to.master.progress',
+          timestamp: new Date(),
+          payload: {
+            taskId: task.id,
+            workerId,
+            kind: ok ? 'COMPLETED' : 'FAILED',
+            correlationId: item.correlationId,
+            detail: {
+              nodeId,
+              ...(ok ? {} : { error: agentAfter?.error ?? 'worker status not completed' }),
+            },
+          },
+        });
+      } finally {
+        this.abortByWorker.delete(workerId);
       }
-
-      await this.eventBus.publish({
-        type: 'worker.to.master.progress',
-        timestamp: new Date(),
-        payload: {
-          taskId: task.id,
-          workerId,
-          kind: ok ? 'COMPLETED' : 'FAILED',
-          correlationId: item.correlationId,
-          detail: { nodeId },
-        },
-      });
     }
   }
 

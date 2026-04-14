@@ -7,6 +7,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "build:web": "npm install --prefix public-react && npm run build --prefix public-react",
+    "build:all": "npm run build && npm run build:web",
+    "prestart": "npm run build:web",
     "start": "node dist/index.js",
     "server": "tsx src/index.ts",
     "cli": "tsx src/ui/cli/index.ts",

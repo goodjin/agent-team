@@ -79,6 +79,13 @@ export interface ChatResponse {
   usage: TokenUsage;
 }
 
+export interface LLMAdapterMeta {
+  providerType: 'anthropic' | 'openai';
+  model: string;
+  /** 基础 API 地址（若可用）；用于日志与诊断 */
+  baseURL?: string;
+}
+
 /**
  * LLM适配器接口
  */
@@ -92,4 +99,7 @@ export interface LLMAdapter {
    * 检查适配器是否可用（API密钥有效）
    */
   isAvailable(): Promise<boolean>;
+
+  /** 适配器元信息（用于日志与诊断；不得包含密钥） */
+  getMeta?(): LLMAdapterMeta;
 }

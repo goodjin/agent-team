@@ -26,6 +26,14 @@ export class AnthropicAdapter implements LLMAdapter {
     this.client = new Anthropic({ apiKey });
   }
 
+  getMeta() {
+    return {
+      providerType: 'anthropic' as const,
+      model: this.model,
+      baseURL: undefined,
+    };
+  }
+
   async chat(request: ChatRequest): Promise<ChatResponse> {
     // 转换消息格式
     const systemMessage = request.messages.find(m => m.role === 'system')?.content || '';

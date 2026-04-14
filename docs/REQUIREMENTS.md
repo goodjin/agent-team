@@ -286,7 +286,7 @@ function matchRole(task: Task): string {
     return 'frontend-dev';
   }
   // ... 更多匹配规则
-  return 'task-analyzer'; // 默认角色
+  return 'task-master'; // 默认角色（v10 需求分析由主控承担）
 }
 ```
 

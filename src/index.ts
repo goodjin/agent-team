@@ -15,6 +15,7 @@ async function main() {
 
   // 启动 API Gateway
   container.apiGateway.start();
+  container.masterFollowUpScheduler.start();
 
   console.log('Agent Team is ready!');
 }
