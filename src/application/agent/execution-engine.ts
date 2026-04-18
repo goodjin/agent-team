@@ -127,6 +127,8 @@ export class AgentExecutionEngine extends EventEmitter {
         throw new Error(`Max iterations (${this.maxIterations}) reached`);
       }
 
+      context.agent.context.variables.lastRunSummary = lastSummary;
+
       this.emit('loop:completed', {
         taskId: context.task.id,
         iterations: context.iterationCount,
@@ -146,6 +148,7 @@ export class AgentExecutionEngine extends EventEmitter {
       await this.updateProgress(context, 100);
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
+      context.agent.context.variables.lastRunSummary = errMsg;
       this.emit('loop:error', {
         taskId: context.task.id,
         iterations: context.iterationCount,
@@ -427,12 +430,12 @@ export class AgentExecutionEngine extends EventEmitter {
       },
     });
 
+    const nodeId =
+      typeof context.agent.context.variables?.currentNodeId === 'string'
+        ? context.agent.context.variables.currentNodeId
+        : undefined;
+
     if (tool.name === 'write_file' && result.success) {
-      const nodeId =
-        context.agent.kind === 'worker' &&
-        typeof context.agent.context.variables?.currentNodeId === 'string'
-          ? context.agent.context.variables.currentNodeId
-          : undefined;
       await this.eventBus.publish({
         type: 'file.created',
         timestamp: new Date(),
@@ -447,11 +450,6 @@ export class AgentExecutionEngine extends EventEmitter {
     }
 
     if (tool.name === 'execute_command' && result.success) {
-      const nodeId =
-        context.agent.kind === 'worker' &&
-        typeof context.agent.context.variables?.currentNodeId === 'string'
-          ? context.agent.context.variables.currentNodeId
-          : undefined;
       const outputs =
         (toolCall.arguments as any)?.outputs && Array.isArray((toolCall.arguments as any).outputs)
           ? ((toolCall.arguments as any).outputs as unknown[])

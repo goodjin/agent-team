@@ -16,6 +16,7 @@ import { RoleRepository } from './domain/role/index.js';
 import { WorkerMailbox } from './application/orchestration/mailbox.js';
 import { OrchestratorService } from './application/orchestration/orchestrator.service.js';
 import { WorkerRunner } from './application/orchestration/worker-runner.js';
+import { SubMasterRunner } from './application/orchestration/submaster-runner.js';
 import { ToolRegistry, builtinTools } from './domain/tool/index.js';
 import { TaskService } from './application/task/task.service.js';
 import { MasterAgentService } from './application/master-agent/master-agent.service.js';
@@ -276,7 +277,6 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
     eventBus,
     logger
   );
-  orchestratorService.setWorkerScheduler((id) => workerRunner.scheduleProcess(id));
 
   const masterAgentService = new MasterAgentService(
     taskRepo,
@@ -291,6 +291,16 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
     memoryToolHandlers,
     toolRegistry
   );
+  const subMasterRunner = new SubMasterRunner(
+    workerMailbox,
+    agentRepo,
+    taskRepo,
+    masterAgentService,
+    orchestratorService,
+    eventBus
+  );
+  orchestratorService.setWorkerScheduler((id) => workerRunner.scheduleProcess(id));
+  orchestratorService.setSubmasterScheduler((id) => subMasterRunner.scheduleProcess(id));
 
   const masterFollowUpScheduler = new MasterFollowUpScheduler({
     taskRepo,
@@ -311,6 +321,22 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
       await masterAgentService.appendWorkerProgressFeed(p.taskId, p);
     } catch (e) {
       console.error('[worker.to.master.progress] ingest:', e);
+    }
+  });
+
+  eventBus.subscribe('submaster.to.parent.progress', async (event) => {
+    const p = event.payload as {
+      taskId: string;
+      submasterId: string;
+      kind: string;
+      nodeId?: string;
+      summary?: string;
+    };
+    if (!p?.taskId || !p.submasterId) return;
+    try {
+      await masterAgentService.appendSubmasterProgressFeed(p.taskId, p);
+    } catch (e) {
+      console.error('[submaster.to.parent.progress] ingest:', e);
     }
   });
 
@@ -350,7 +376,7 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
   experienceCurator.start(eventBus);
 
   const apiGateway = new APIGateway({
-    port: 3000,
+    port: 3005,
     taskService,
     logService,
     artifactService,

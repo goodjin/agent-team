@@ -22,6 +22,8 @@ import { mkdir } from 'fs/promises';
 export interface MasterToolContext {
   taskId: string;
   masterAgentId: string;
+  currentNodeId?: string;
+  broadcastReply?: boolean;
 }
 
 const MASTER_FILE_TOOL_NAMES = new Set(['read_file', 'write_file', 'list_files']);
@@ -93,9 +95,28 @@ const MASTER_CORE_TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'create_submaster',
+    description: '在本任务下创建具名子主控 Agent，用于承接模块节点并继续拆分',
+    parameters: {
+      type: 'object',
+      properties: {
+        roleId: {
+          type: 'string',
+          description: '可选；缺省为 task-master。角色应具备主控/模块负责人能力',
+        },
+        displayName: { type: 'string' },
+        initialBrief: {
+          type: 'string',
+          description: '子主控初始上下文；建议说明负责模块、边界、输入输出与汇报要求',
+        },
+      },
+      required: ['displayName'],
+    },
+  },
+  {
     name: 'submit_plan',
     description:
-      '提交 DAG 计划：{ version, nodes: [{ id, workerId, dependsOn?, parallelGroup?, brief? }] }。提交前须已用 write_file 将用户最新需求写入工作区 docs/REQUIREMENTS.md（用户新提或变更需求时**先更文档再 submit_plan**）。',
+      '提交 DAG 计划。新格式：{ version, nodes: [{ id, executorType, executorId, nodeKind, dependsOn?, parallelGroup?, brief?, decompositionPolicy? }] }；旧格式中的 workerId 仍兼容并会被视为 worker+atomic。若调用者是 submaster 且已承接某个模块节点，则本工具会把计划视为“当前模块节点的子计划”。提交前须已用 write_file 将用户最新需求写入工作区 docs/REQUIREMENTS.md（用户新提或变更需求时**先更文档再 submit_plan**）。',
     parameters: {
       type: 'object',
       properties: {
@@ -217,13 +238,15 @@ export class MasterToolExecutor {
   ): Promise<unknown> {
     switch (name) {
       case 'reply_user':
-        return this.replyUser(agent, task, String(args.content ?? ''));
+        return this.replyUser(agent, task, String(args.content ?? ''), ctx);
       case 'create_role':
         return this.createRole(args);
       case 'create_worker':
         return this.createWorker(args, ctx, task);
+      case 'create_submaster':
+        return this.createSubmaster(args, ctx, task);
       case 'submit_plan':
-        return this.submitPlan(args, ctx);
+        return this.submitPlan(args, ctx, agent);
       case 'send_worker_command':
         return this.sendWorkerCommand(args, ctx, task);
       case 'query_orchestration_state':
@@ -318,7 +341,12 @@ export class MasterToolExecutor {
     return { ok: true };
   }
 
-  private async replyUser(agent: Agent, task: Task, content: string): Promise<{ ok: true }> {
+  private async replyUser(
+    agent: Agent,
+    task: Task,
+    content: string,
+    ctx: MasterToolContext
+  ): Promise<{ ok: true; visible: string }> {
     const { visible, thinking } = splitThinkingAndVisible(content);
     if (thinking) {
       await this.logger.log({
@@ -338,12 +366,14 @@ export class MasterToolExecutor {
       timestamp: new Date(),
       payload: { taskId: task.id, role: 'assistant', contentLength: visible.length },
     });
-    this.wsManager.broadcast(task.id, {
-      type: 'master_reply',
-      timestamp: new Date().toISOString(),
-      data: { content: visible, source: 'reply_user' },
-    });
-    return { ok: true };
+    if (ctx.broadcastReply !== false) {
+      this.wsManager.broadcast(task.id, {
+        type: 'master_reply',
+        timestamp: new Date().toISOString(),
+        data: { content: visible, source: 'reply_user' },
+      });
+    }
+    return { ok: true, visible };
   }
 
   private async createRole(
@@ -422,13 +452,75 @@ export class MasterToolExecutor {
     return { ok: true, workerId };
   }
 
+  private async createSubmaster(
+    args: Record<string, unknown>,
+    ctx: MasterToolContext,
+    task: Task
+  ): Promise<{ ok: true; submasterId: string } | { error: string }> {
+    const roleIdRaw = String(args.roleId ?? '').trim();
+    const roleId = roleIdRaw || 'task-master';
+    const displayName = String(args.displayName ?? '').trim();
+    if (!displayName) return { error: 'displayName required' };
+
+    let role: Role | null = await this.roleRepo.findById(roleId);
+    if (!role) role = this.roleMatcher.getBuiltinRole(roleId);
+    if (!role) return { error: 'ROLE_NOT_FOUND' };
+    if (isReservedSystemRoleId(role.id) || role.isSystem) {
+      return { error: 'ROLE_NOT_ASSIGNABLE' };
+    }
+
+    const submasterId = generateId();
+    const initialBrief = typeof args.initialBrief === 'string' ? args.initialBrief : '';
+
+    const submaster: Agent = {
+      id: submasterId,
+      taskId: task.id,
+      roleId,
+      kind: 'submaster',
+      displayName,
+      masterAgentId: ctx.masterAgentId,
+      status: 'idle',
+      context: {
+        systemPrompt: role.systemPrompt,
+        history: [],
+        variables: initialBrief ? { submasterBrief: initialBrief } : {},
+      },
+      createdAt: new Date(),
+    };
+    await this.agentRepo.save(submaster);
+
+    await this.eventBus.publish({
+      type: 'agent.created',
+      timestamp: new Date(),
+      payload: { agent: submaster, role },
+    });
+
+    this.wsManager.broadcast(task.id, {
+      type: 'worker.status',
+      timestamp: new Date().toISOString(),
+      data: { taskId: task.id, workerId: submasterId, displayName, status: 'idle' },
+    });
+
+    return { ok: true, submasterId };
+  }
+
   private async submitPlan(
     args: Record<string, unknown>,
-    ctx: MasterToolContext
+    ctx: MasterToolContext,
+    agent: Agent
   ): Promise<unknown> {
     const plan = args.plan;
     const expectedPlanVersion =
       typeof args.expectedPlanVersion === 'number' ? args.expectedPlanVersion : undefined;
+    if (agent.kind === 'submaster' && ctx.currentNodeId) {
+      return this.orchestrator.submitSubplan(
+        ctx.taskId,
+        ctx.currentNodeId,
+        ctx.masterAgentId,
+        plan,
+        { expectedPlanVersion }
+      );
+    }
     return this.orchestrator.submitPlan(ctx.taskId, plan, { expectedPlanVersion });
   }
 

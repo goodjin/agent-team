@@ -21,7 +21,14 @@ export interface TaskPostmortemDto {
     planVersion: number;
     totalNodes: number;
     byStatus: Record<string, number>;
-    failedNodes: Array<{ id: string; workerId: string; brief?: string }>;
+    failedNodes: Array<{
+      id: string;
+      executorType: string;
+      executorId: string;
+      nodeKind: string;
+      brief?: string;
+      workerId?: string;
+    }>;
   };
   /** 供操作台快速阅读的中文要点 */
   bullets: string[];
@@ -87,7 +94,14 @@ export class PostmortemService {
       }
       const failedNodes = nodes
         .filter((n) => n.status === 'failed')
-        .map((n) => ({ id: n.id, workerId: n.workerId, brief: n.brief }));
+        .map((n) => ({
+          id: n.id,
+          executorType: n.executorType,
+          executorId: n.executorId,
+          nodeKind: n.nodeKind,
+          brief: n.brief,
+          workerId: n.workerId,
+        }));
       plan = {
         planVersion: snapshot.activePlan.planVersion,
         totalNodes: nodes.length,

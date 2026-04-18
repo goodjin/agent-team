@@ -5,6 +5,7 @@ import type { IEventBus } from '../../infrastructure/event-bus/index.js';
 import type { ILogger } from '../../infrastructure/logger/index.js';
 import { WorkerMailbox, type MailboxEnvelope } from './mailbox.js';
 import type { OrchestratorService } from './orchestrator.service.js';
+import { normalizeProgressReport } from './progress-report.js';
 
 /**
  * v10：按 workerId 串行消费信箱，ASSIGN_WORK 触发 AgentService.execute（可 Abort）
@@ -167,11 +168,24 @@ export class WorkerRunner {
 
         const agentAfter = await this.agentRepo.findById(workerId);
         const ok = agentAfter?.status === 'completed';
+        const rawSummary =
+          typeof agentAfter?.context.variables?.lastRunSummary === 'string'
+            ? agentAfter.context.variables.lastRunSummary
+            : '';
+        const errorMessage = agentAfter?.error ?? (!ok ? rawSummary || 'worker status not completed' : '');
+        const report = normalizeProgressReport({
+          statusHint: ok ? 'done' : 'blocked',
+          scopeHint: nodeId ? `原子节点 ${nodeId}` : '原子任务执行',
+          summary: ok ? rawSummary : errorMessage,
+          nextStepHint: ok
+            ? '等待直属上级审查当前节点结果。'
+            : '等待直属上级决定返工、重派或升级处理。',
+        });
 
         await this.resetWorkerAgent(workerId);
 
         if (nodeId) {
-          await this.orchestrator.onWorkerNodeDone(task.id, nodeId, ok);
+          await this.orchestrator.onWorkerNodeDone(task.id, nodeId, ok, report);
         }
 
         await this.eventBus.publish({
@@ -184,7 +198,9 @@ export class WorkerRunner {
             correlationId: item.correlationId,
             detail: {
               nodeId,
-              ...(ok ? {} : { error: agentAfter?.error ?? 'worker status not completed' }),
+              summary: rawSummary || undefined,
+              report,
+              ...(ok ? {} : { error: errorMessage }),
             },
           },
         });

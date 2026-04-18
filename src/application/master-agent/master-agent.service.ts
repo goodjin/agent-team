@@ -17,6 +17,7 @@ import type { TaskService } from '../task/task.service.js';
 import { MasterToolExecutor, MASTER_TOOL_DEFINITIONS } from './master-tool-executor.js';
 import { formatLLMProviderError, llmErrorMetadata } from '../../infrastructure/llm/error-format.js';
 import { splitThinkingAndVisible } from '../../infrastructure/utils/chat-sanitize.js';
+import { formatProgressReport, normalizeProgressReport, type ProgressReport } from '../orchestration/progress-report.js';
 
 function buildMasterSystemExtras(agent: Agent): string {
   const parts: string[] = [];
@@ -173,6 +174,43 @@ export class MasterAgentService {
       throw new Error('Master agent not found');
     }
 
+    return this.handleMessageWithAgent(task, agent, content, { broadcastReply: true });
+  }
+
+  /**
+   * 对任意主控型 agent 执行一轮消息处理；子主控默认不向用户广播回复。
+   */
+  async handleAgentMessage(
+    taskId: string,
+    agentId: string,
+    content: string,
+    opts?: { broadcastReply?: boolean }
+  ): Promise<string> {
+    const task = await this.taskRepo.findById(taskId);
+    if (!task) {
+      throw new Error(`Task not found: ${taskId}`);
+    }
+    const agent = await this.agentRepo.findById(agentId);
+    if (!agent || agent.taskId !== taskId) {
+      throw new Error(`Agent not found: ${agentId}`);
+    }
+    if (agent.kind !== 'master' && agent.kind !== 'submaster') {
+      throw new Error(`Agent is not master-like: ${agentId}`);
+    }
+
+    return this.handleMessageWithAgent(task, agent, content, {
+      broadcastReply: opts?.broadcastReply ?? false,
+    });
+  }
+
+  private async handleMessageWithAgent(
+    task: Task,
+    agent: Agent,
+    content: string,
+    opts: { broadcastReply: boolean }
+  ): Promise<string> {
+    const taskId = task.id;
+
     agent.context.history.push({ role: 'user', content });
 
     await this.eventBus.publish({
@@ -285,6 +323,11 @@ export class MasterAgentService {
           const result = await this.toolExecutor.runTool(tc.name, args, {
             taskId,
             masterAgentId: agent.id,
+            currentNodeId:
+              typeof agent.context.variables?.currentNodeId === 'string'
+                ? agent.context.variables.currentNodeId
+                : undefined,
+            broadcastReply: opts.broadcastReply,
           }, agent, task);
           messages.push({
             role: 'tool',
@@ -292,7 +335,10 @@ export class MasterAgentService {
             content: JSON.stringify(result),
           });
           if (tc.name === 'reply_user') {
-            lastVisibleReply = String(args.content ?? lastVisibleReply);
+            lastVisibleReply =
+              typeof (result as { visible?: unknown })?.visible === 'string'
+                ? String((result as { visible?: unknown }).visible)
+                : String(args.content ?? lastVisibleReply);
           }
         }
         continue;
@@ -314,47 +360,32 @@ export class MasterAgentService {
         }
         agent.context.history.push({ role: 'assistant', content: visible });
         await this.agentRepo.save(agent);
-        this.wsManager.broadcast(taskId, {
-          type: 'master_reply',
-          timestamp: new Date().toISOString(),
-          data: { content: visible, usage: response.usage },
-        });
+        if (opts.broadcastReply) {
+          this.wsManager.broadcast(taskId, {
+            type: 'master_reply',
+            timestamp: new Date().toISOString(),
+            data: { content: visible, usage: response.usage },
+          });
+        }
         return visible;
       }
       break;
     }
 
     if (lastVisibleReply) {
-      const { visible, thinking } = splitThinkingAndVisible(lastVisibleReply);
-      if (thinking) {
-        await this.logger.log({
-          timestamp: new Date(),
-          level: 'info',
-          taskId,
-          agentId: agent.id,
-          type: 'thought',
-          content: `主控 · 思考过程（对话中已隐藏）\n${thinking}`,
-          metadata: { source: 'master_tool_round' },
-        });
-      }
-      agent.context.history.push({ role: 'assistant', content: visible });
-      await this.agentRepo.save(agent);
-      this.wsManager.broadcast(taskId, {
-        type: 'master_reply',
-        timestamp: new Date().toISOString(),
-        data: { content: visible, usage: lastUsage },
-      });
-      return visible;
+      return lastVisibleReply;
     }
 
     const fallback = '（本轮未产生可见回复；若已执行工具，请查看编排状态或重试。）';
     agent.context.history.push({ role: 'assistant', content: fallback });
     await this.agentRepo.save(agent);
-    this.wsManager.broadcast(taskId, {
-      type: 'master_reply',
-      timestamp: new Date().toISOString(),
-      data: { content: fallback, usage: lastUsage },
-    });
+    if (opts.broadcastReply) {
+      this.wsManager.broadcast(taskId, {
+        type: 'master_reply',
+        timestamp: new Date().toISOString(),
+        data: { content: fallback, usage: lastUsage },
+      });
+    }
     return fallback;
   }
 
@@ -372,38 +403,112 @@ export class MasterAgentService {
     }
   ): Promise<void> {
     if (payload.kind !== 'COMPLETED' && payload.kind !== 'FAILED') return;
-    await this.ensureSessionStarted(taskId);
     const task = await this.taskRepo.findById(taskId);
-    if (!task?.masterAgentId) return;
-    const agent = await this.agentRepo.findById(task.masterAgentId);
-    if (!agent) return;
+    if (!task) return;
 
     const worker = await this.agentRepo.findById(payload.workerId);
+    const supervisorAgentId = worker?.masterAgentId ?? task.masterAgentId;
+    if (!supervisorAgentId) return;
     const label = worker?.displayName || worker?.roleId || payload.workerId.slice(0, 8);
     const nodeId = payload.detail?.nodeId != null ? String(payload.detail.nodeId) : '';
     const err = payload.detail?.error != null ? String(payload.detail.error) : '';
-    const lines = [
-      `[系统·工人汇报] 「${label}」（${payload.workerId}）`,
-      `${payload.kind === 'COMPLETED' ? '✅ 本轮工人执行已完成' : '❌ 本轮工人执行失败'}${nodeId ? ` · DAG 节点 ${nodeId}` : ''}`,
-      err ? `原因/说明：${err.slice(0, 4000)}` : '',
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const report = this.coerceProgressReport((payload.detail?.report as ProgressReport | undefined) ?? undefined, {
+      statusHint: payload.kind === 'COMPLETED' ? 'done' : 'blocked',
+      scopeHint: nodeId ? `原子节点 ${nodeId}` : `工人节点 ${label}`,
+      summary:
+        payload.detail?.summary != null
+          ? String(payload.detail.summary)
+          : err,
+      nextStepHint:
+        payload.kind === 'COMPLETED'
+          ? '等待直属上级审查当前节点结果。'
+          : '等待直属上级决定返工、重派或升级处理。',
+    });
+    const lines = formatProgressReport(report, {
+      header: `[系统·工人汇报] 「${label}」（${payload.workerId}）`,
+    });
 
-    agent.context.history.push({ role: 'user', content: lines });
+    await this.appendProgressFeed(task, supervisorAgentId, lines, 'worker_feed');
+  }
+
+  async appendSubmasterProgressFeed(
+    taskId: string,
+    payload: {
+      taskId: string;
+      submasterId: string;
+      kind: string;
+      nodeId?: string;
+      summary?: string;
+      report?: ProgressReport;
+    }
+  ): Promise<void> {
+    const task = await this.taskRepo.findById(taskId);
+    if (!task) return;
+    const submaster = await this.agentRepo.findById(payload.submasterId);
+    const supervisorAgentId = submaster?.masterAgentId ?? task.masterAgentId;
+    if (!supervisorAgentId) return;
+    const label = submaster?.displayName || submaster?.roleId || payload.submasterId.slice(0, 8);
+    const report = this.coerceProgressReport(payload.report, {
+      statusHint:
+        payload.kind === 'FAILED'
+          ? 'blocked'
+          : payload.kind === 'PLANNED'
+            ? 'in-progress'
+            : 'done',
+      scopeHint: payload.nodeId ? `模块节点 ${payload.nodeId}` : `模块任务 ${label}`,
+      summary: payload.summary,
+      nextStepHint:
+        payload.kind === 'PLANNED'
+          ? '等待直属子节点继续推进并在收口后复核模块结果。'
+          : payload.kind === 'FAILED'
+            ? '等待上一级决定是否返工、补充或终止。'
+            : '等待上一级审查当前模块结果。',
+    });
+    const lines = formatProgressReport(report, {
+      header: `[系统·子主控汇报] 「${label}」（${payload.submasterId}）`,
+    });
+
+    await this.appendProgressFeed(task, supervisorAgentId, lines, 'submaster_feed');
+  }
+
+  private coerceProgressReport(
+    report: ProgressReport | undefined,
+    fallback: {
+      statusHint: 'done' | 'blocked' | 'need-change' | 'in-progress';
+      scopeHint: string;
+      summary?: string;
+      nextStepHint?: string;
+    }
+  ): ProgressReport {
+    if (report) return report;
+    return normalizeProgressReport(fallback);
+  }
+
+  private async appendProgressFeed(
+    task: Task,
+    targetAgentId: string,
+    content: string,
+    source: 'worker_feed' | 'submaster_feed'
+  ): Promise<void> {
+    const agent = await this.agentRepo.findById(targetAgentId);
+    if (!agent) return;
+
+    agent.context.history.push({ role: 'user', content });
     await this.contextCompressor.maybeCompressMasterHistory(agent);
     await this.agentRepo.save(agent);
 
     await this.eventBus.publish({
       type: 'master.message.appended',
       timestamp: new Date(),
-      payload: { taskId, role: 'user', contentLength: lines.length, source: 'worker_feed' },
+      payload: { taskId: task.id, role: 'user', contentLength: content.length, source },
     });
-    this.wsManager.broadcast(taskId, {
-      type: 'master_conversation_updated',
-      timestamp: new Date().toISOString(),
-      data: { reason: 'worker_progress', workerId: payload.workerId, kind: payload.kind },
-    });
+    if (task.masterAgentId && targetAgentId === task.masterAgentId) {
+      this.wsManager.broadcast(task.id, {
+        type: 'master_conversation_updated',
+        timestamp: new Date().toISOString(),
+        data: { reason: source, agentId: targetAgentId },
+      });
+    }
   }
 }
 

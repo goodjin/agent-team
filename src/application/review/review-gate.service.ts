@@ -8,6 +8,8 @@ import type { ITaskRepository } from '../../domain/task/task.repository.js';
 import type { IAgentRepository } from '../../domain/agent/agent.repository.js';
 import type { OrchestratorService } from '../orchestration/orchestrator.service.js';
 import type { ReviewRoleMappingStore } from './review-role-mapping.store.js';
+import type { PlanExecutorType, PlanNodeKind } from '../../domain/orchestration/plan-dag.js';
+import type { ProgressReport } from '../orchestration/progress-report.js';
 
 type ReviewVerdict = {
   passed: boolean;
@@ -124,6 +126,11 @@ export class ReviewGateService {
         success?: boolean;
         reviewAttempts?: number;
         workerId?: string;
+        submasterId?: string;
+        executorType?: PlanExecutorType;
+        executorId?: string;
+        nodeKind?: PlanNodeKind;
+        report?: ProgressReport;
       };
       if (!p?.taskId || !p.nodeId) return;
       if (!p.success) return; // 失败仍按原逻辑结束
@@ -131,7 +138,20 @@ export class ReviewGateService {
         p.taskId,
         p.nodeId,
         typeof p.reviewAttempts === 'number' ? p.reviewAttempts : 0,
-        typeof p.workerId === 'string' ? p.workerId : ''
+        typeof p.executorType === 'string'
+          ? p.executorType
+          : typeof p.submasterId === 'string'
+            ? 'submaster'
+            : 'worker',
+        typeof p.executorId === 'string'
+          ? p.executorId
+          : typeof p.submasterId === 'string'
+            ? p.submasterId
+            : typeof p.workerId === 'string'
+              ? p.workerId
+              : '',
+        p.nodeKind === 'module' ? 'module' : 'atomic',
+        p.report
       );
     });
   }
@@ -140,17 +160,22 @@ export class ReviewGateService {
     taskId: string,
     nodeId: string,
     reviewAttempts: number,
-    workerId: string
+    executorType: PlanExecutorType,
+    executorId: string,
+    nodeKind: PlanNodeKind,
+    report?: ProgressReport
   ): Promise<void> {
     const task = await this.taskRepo.findById(taskId);
     if (!task) return;
     const wsRoot = path.resolve(process.cwd(), 'data/workspaces', taskId);
 
-    const worker = workerId ? await this.agentRepo.findById(workerId) : null;
-    const workerRoleId = worker?.roleId ? String(worker.roleId) : '';
+    const executor = executorId ? await this.agentRepo.findById(executorId) : null;
+    const executorRoleId = executor?.roleId ? String(executor.roleId) : '';
     const mapping = await this.mappingStore.get();
     const reviewerRoleId =
-      (workerRoleId && mapping.roleToReviewer[workerRoleId]) || mapping.defaultReviewerRoleId;
+      executorType === 'worker' && executorRoleId
+        ? mapping.roleToReviewer[executorRoleId] || mapping.defaultReviewerRoleId
+        : mapping.defaultReviewerRoleId;
 
     const role = await this.roleRepo.findById(reviewerRoleId);
     const systemPrompt =
@@ -160,9 +185,24 @@ export class ReviewGateService {
     const req = await readClip(wsRoot, 'docs/REQUIREMENTS.md', 12000);
     const exp = await readClip(wsRoot, 'docs/EXPERIENCE.md', 8000);
     const taskMd = await readClip(wsRoot, 'TASK.md', 8000);
+    const moduleDoc =
+      nodeKind === 'module' ? await readClip(wsRoot, `docs/modules/${nodeId}.md`, 8000) : '';
+    const snapshot = await this.orchestrator.getSnapshot(taskId);
+    const nodeSnapshot = snapshot.activePlan?.nodes.find((node) => node.id === nodeId);
+    const childSummaries =
+      nodeKind === 'module'
+        ? (snapshot.activePlan?.nodes ?? [])
+            .filter((node) => node.parentNodeId === nodeId)
+            .map((node) => {
+              const raw = node.lastReport
+                ? `${node.lastReport.status} / ${node.lastReport.outputs[0] ?? '详见工作区产物'}`
+                : node.status;
+              return `- ${node.id}: ${raw}`;
+            })
+            .join('\n')
+        : '';
 
-    const key = `${taskId}:${nodeId}`;
-    const changed = [...(this.filesByNode.get(key) ?? new Set<string>())];
+    const changed = this.collectChangedFiles(taskId, nodeId, nodeKind);
     const changedBlocks: string[] = [];
     for (const fp of changed.slice(0, 24)) {
       const clip = await readClip(wsRoot, fp, 4000);
@@ -175,16 +215,29 @@ export class ReviewGateService {
         `请对节点产出做质量门禁审查，并按你的规范输出 JSON。\n\n` +
         `- taskId: ${taskId}\n` +
         `- nodeId: ${nodeId}\n` +
-        (workerId ? `- workerId: ${workerId}\n` : '') +
-        (workerRoleId ? `- workerRoleId: ${workerRoleId}\n` : '') +
+        `- executorType: ${executorType}\n` +
+        (executorId ? `- executorId: ${executorId}\n` : '') +
+        (executorRoleId ? `- executorRoleId: ${executorRoleId}\n` : '') +
+        `- nodeKind: ${nodeKind}\n` +
         `- reviewerRoleId: ${reviewerRoleId}\n` +
         `- 返工轮次(已发生): ${reviewAttempts}\n\n` +
         `## 全局需求（截断）\n${req}\n\n` +
         `## 经验文件（截断，可选）\n${exp}\n\n` +
         `## TASK.md（截断，可选）\n${taskMd}\n\n` +
+        (nodeKind === 'module' ? `## 模块文档（截断，可选）\n${moduleDoc || '（无法读取）'}\n\n` : '') +
+        `## 当前节点上行汇报（截断，可选）\n${
+          report
+            ? JSON.stringify(report, null, 2)
+            : nodeSnapshot?.lastReport
+              ? JSON.stringify(nodeSnapshot.lastReport, null, 2)
+              : '（无）'
+        }\n\n` +
+        (nodeKind === 'module'
+          ? `## 直属子节点摘要\n${childSummaries || '（无直属子节点摘要）'}\n\n`
+          : '') +
         `## 本节点修改的文件片段（仅来自该节点 write_file 记录；可能不含 execute_command 产生的改动）\n` +
         (changedBlocks.length ? changedBlocks.join('\n\n') : '（未捕获到该节点写入的文件；请要求实现者补充关键文件路径与验收方式）') +
-        `\n\n重要：若材料不足以确认通过，请不通过，并给出需要补齐的产出与验收口径。`,
+        `\n\n重要：若材料不足以确认通过，请不通过，并给出需要补齐的产出与验收口径。模块节点除检查文件外，还要检查模块汇总是否准确覆盖直属子节点结果、风险和遗留项。`,
     };
 
     let verdict: ReviewVerdict | null = null;
@@ -254,5 +307,18 @@ export class ReviewGateService {
       { maxAttempts: 2 }
     );
   }
-}
 
+  private collectChangedFiles(taskId: string, nodeId: string, nodeKind: PlanNodeKind): string[] {
+    const files = new Set<string>();
+    const prefix = `${taskId}:`;
+    for (const [key, set] of this.filesByNode.entries()) {
+      if (!key.startsWith(prefix)) continue;
+      const trackedNodeId = key.slice(prefix.length);
+      const include =
+        trackedNodeId === nodeId || (nodeKind === 'module' && trackedNodeId.startsWith(`${nodeId}/`));
+      if (!include) continue;
+      for (const file of set) files.add(file);
+    }
+    return [...files];
+  }
+}

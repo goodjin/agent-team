@@ -3,9 +3,19 @@ import type { IAgentRepository } from '../../domain/agent/agent.repository.js';
 import type { Task } from '../../domain/task/task.entity.js';
 import type { IEventBus } from '../../infrastructure/event-bus/index.js';
 import { WebSocketManager } from '../../infrastructure/websocket/index.js';
-import { parsePlanPayload, topologicalLayers } from '../../domain/orchestration/plan-dag.js';
+import {
+  parsePlanPayload,
+  topologicalLayers,
+  type DecompositionPolicy,
+  type PlanExecutorType,
+  type PlanNodeKind,
+} from '../../domain/orchestration/plan-dag.js';
 import { generateId } from '../../infrastructure/utils/id.js';
 import { WorkerMailbox, type MailboxEnvelope } from './mailbox.js';
+import {
+  summarizeProgressReport,
+  type ProgressReport,
+} from './progress-report.js';
 import path from 'path';
 import { readFile } from 'fs/promises';
 
@@ -52,13 +62,20 @@ type NodeStatus = 'pending' | 'running' | 'reviewing' | 'completed' | 'failed';
 
 interface TrackedNode {
   id: string;
-  workerId: string;
+  executorType: PlanExecutorType;
+  executorId: string;
+  nodeKind: PlanNodeKind;
+  parentNodeId?: string;
+  childNodeIds: string[];
   dependsOn: string[];
   parallelGroup?: string;
   brief?: string;
+  decompositionPolicy?: DecompositionPolicy;
   status: NodeStatus;
   reviewAttempts: number;
+  finalizeQueued?: boolean;
   lastReviewNotes?: string;
+  lastReport?: ProgressReport;
 }
 
 interface ActivePlan {
@@ -73,7 +90,8 @@ interface ActivePlan {
  */
 export class OrchestratorService {
   private active = new Map<string, ActivePlan>();
-  private scheduleFn: ((workerId: string) => void) | null = null;
+  private workerScheduleFn: ((workerId: string) => void) | null = null;
+  private submasterScheduleFn: ((submasterId: string) => void) | null = null;
 
   constructor(
     private taskRepo: ITaskRepository,
@@ -84,11 +102,19 @@ export class OrchestratorService {
   ) {}
 
   setWorkerScheduler(fn: (workerId: string) => void): void {
-    this.scheduleFn = fn;
+    this.workerScheduleFn = fn;
   }
 
-  private scheduleWorker(workerId: string): void {
-    this.scheduleFn?.(workerId);
+  setSubmasterScheduler(fn: (submasterId: string) => void): void {
+    this.submasterScheduleFn = fn;
+  }
+
+  private scheduleExecutor(executorType: PlanExecutorType, executorId: string): void {
+    if (executorType === 'submaster') {
+      this.submasterScheduleFn?.(executorId);
+      return;
+    }
+    this.workerScheduleFn?.(executorId);
   }
 
   async submitPlan(
@@ -112,19 +138,8 @@ export class OrchestratorService {
       return { ok: false, error: 'STALE_PLAN_VERSION' };
     }
 
-    const agents = await this.agentRepo.findByTaskId(taskId);
-    const validWorker = new Set<string>();
-    for (const w of agents) {
-      if (task.masterAgentId && w.id === task.masterAgentId) continue;
-      if (w.kind === 'master') continue;
-      validWorker.add(w.id);
-    }
-
-    for (const n of parsed.plan.nodes) {
-      if (!validWorker.has(n.workerId)) {
-        return { ok: false, error: `WORKER_NOT_FOUND: ${n.workerId}` };
-      }
-    }
+    const execValidation = await this.validatePlanExecutors(task, parsed.plan.nodes);
+    if (!execValidation.ok) return execValidation;
 
     const newPv = currentPv + 1;
     task.planVersion = newPv;
@@ -136,12 +151,19 @@ export class OrchestratorService {
     for (const n of parsed.plan.nodes) {
       nodes.set(n.id, {
         id: n.id,
-        workerId: n.workerId,
+        executorType: n.executorType,
+        executorId: n.executorId,
+        nodeKind: n.nodeKind,
+        parentNodeId: undefined,
+        childNodeIds: [],
         dependsOn: n.dependsOn ?? [],
         parallelGroup: n.parallelGroup,
         brief: n.brief,
+        decompositionPolicy: n.decompositionPolicy,
         status: 'pending',
         reviewAttempts: 0,
+        finalizeQueued: false,
+        lastReport: undefined,
       });
     }
 
@@ -166,6 +188,117 @@ export class OrchestratorService {
     return { ok: true, planVersion: newPv, nodeCount: parsed.plan.nodes.length };
   }
 
+  async submitSubplan(
+    taskId: string,
+    parentNodeId: string,
+    submittedByAgentId: string,
+    planPayload: unknown,
+    opts?: { expectedPlanVersion?: number }
+  ): Promise<
+    { ok: true; planVersion: number; nodeCount: number; parentNodeId: string } | { ok: false; error: string }
+  > {
+    const task = await this.taskRepo.findById(taskId);
+    if (!task) return { ok: false, error: 'TASK_NOT_FOUND' };
+    const ap = this.active.get(taskId);
+    if (!ap) return { ok: false, error: 'PLAN_NOT_ACTIVE' };
+    if (opts?.expectedPlanVersion !== undefined && opts.expectedPlanVersion !== (task.planVersion ?? 0)) {
+      return { ok: false, error: 'STALE_PLAN_VERSION' };
+    }
+
+    const parent = ap.nodes.get(parentNodeId);
+    if (!parent) return { ok: false, error: 'PARENT_NODE_NOT_FOUND' };
+    if (parent.executorType !== 'submaster') {
+      return { ok: false, error: 'PARENT_NODE_NOT_SUBMASTER' };
+    }
+    if (parent.executorId !== submittedByAgentId) {
+      return { ok: false, error: 'PARENT_NODE_NOT_OWNED_BY_AGENT' };
+    }
+    if (parent.childNodeIds.length > 0) {
+      return { ok: false, error: 'SUBPLAN_ALREADY_SUBMITTED' };
+    }
+    if (parent.status !== 'running') {
+      return { ok: false, error: 'PARENT_NODE_NOT_RUNNING' };
+    }
+
+    const parsed = parsePlanPayload(planPayload);
+    if (!parsed.ok) return { ok: false, error: parsed.error };
+
+    const remappedNodes = parsed.plan.nodes.map((node) => ({
+      ...node,
+      id: `${parentNodeId}/${node.id}`,
+      dependsOn: (node.dependsOn ?? []).map((dep) => `${parentNodeId}/${dep}`),
+    }));
+
+    const dup = remappedNodes.find((node) => ap.nodes.has(node.id));
+    if (dup) {
+      return { ok: false, error: `DUPLICATE_NODE_ID: ${dup.id}` };
+    }
+
+    const execValidation = await this.validatePlanExecutors(task, remappedNodes);
+    if (!execValidation.ok) return execValidation;
+
+    for (const node of remappedNodes) {
+      ap.nodes.set(node.id, {
+        id: node.id,
+        executorType: node.executorType,
+        executorId: node.executorId,
+        nodeKind: node.nodeKind,
+        parentNodeId,
+        childNodeIds: [],
+        dependsOn: node.dependsOn ?? [],
+        parallelGroup: node.parallelGroup,
+        brief: node.brief,
+        decompositionPolicy: node.decompositionPolicy,
+        status: 'pending',
+        reviewAttempts: 0,
+        finalizeQueued: false,
+        lastReport: undefined,
+      });
+    }
+    parent.childNodeIds = remappedNodes.map((node) => node.id);
+    ap.layers = topologicalLayers(
+      [...ap.nodes.values()].map((node) => ({
+        id: node.id,
+        executorType: node.executorType,
+        executorId: node.executorId,
+        nodeKind: node.nodeKind,
+        dependsOn: node.dependsOn,
+        parallelGroup: node.parallelGroup,
+        brief: node.brief,
+        decompositionPolicy: node.decompositionPolicy,
+      }))
+    );
+
+    await this.eventBus.publish({
+      type: 'orch.subplan.submitted',
+      timestamp: new Date(),
+      payload: {
+        taskId,
+        planVersion: ap.planVersion,
+        parentNodeId,
+        nodeCount: remappedNodes.length,
+        submittedByAgentId,
+      },
+    });
+    this.wsManager.broadcast(taskId, {
+      type: 'orchestration.plan_updated',
+      timestamp: new Date().toISOString(),
+      data: {
+        taskId,
+        planVersion: ap.planVersion,
+        summary: `subplan for ${parentNodeId}: ${remappedNodes.length} nodes`,
+      },
+    });
+
+    await this.tryLaunchPending(taskId, ap);
+    return { ok: true, planVersion: ap.planVersion, nodeCount: remappedNodes.length, parentNodeId };
+  }
+
+  hasSubmittedSubplan(taskId: string, nodeId: string): boolean {
+    const node = this.active.get(taskId)?.nodes.get(nodeId);
+    return !!node?.childNodeIds.length;
+  }
+
   async startOrchestration(
     taskId: string
   ): Promise<{ ok: true } | { ok: false; error: string }> {
@@ -187,6 +320,12 @@ export class OrchestratorService {
     n: TrackedNode,
     nodes: Map<string, TrackedNode>
   ): 'wait' | 'runnable' | 'blocked' {
+    if (n.parentNodeId) {
+      const parent = nodes.get(n.parentNodeId);
+      if (!parent) return 'blocked';
+      if (parent.status === 'failed') return 'blocked';
+      if (parent.status === 'pending') return 'wait';
+    }
     for (const d of n.dependsOn) {
       const dn = nodes.get(d);
       if (!dn) return 'blocked';
@@ -203,10 +342,19 @@ export class OrchestratorService {
       if (c === 'blocked') {
         n.status = 'failed';
       } else if (c === 'runnable') {
-        await this.sendAssignWork(taskId, ap, n);
+        await this.assignRunnableNode(taskId, ap, n);
       }
     }
+    await this.maybeScheduleSubmasterFinalization(taskId, ap);
     await this.maybeFinalizeOrchestration(taskId, ap);
+  }
+
+  private async assignRunnableNode(taskId: string, ap: ActivePlan, node: TrackedNode): Promise<void> {
+    if (node.executorType === 'submaster') {
+      await this.sendAssignSubplan(taskId, ap, node);
+      return;
+    }
+    await this.sendAssignWork(taskId, ap, node);
   }
 
   private async sendAssignWork(taskId: string, ap: ActivePlan, node: TrackedNode): Promise<void> {
@@ -236,7 +384,7 @@ export class OrchestratorService {
       timestamp: new Date(),
       payload: {
         taskId,
-        targetWorkerId: node.workerId,
+        targetWorkerId: node.executorId,
         command: 'ASSIGN_WORK',
         correlationId,
         planVersion: ap.planVersion,
@@ -244,35 +392,80 @@ export class OrchestratorService {
       },
     });
 
-    this.mailbox.enqueue(node.workerId, {
+    this.mailbox.enqueue(node.executorId, {
       correlationId,
       planVersion: ap.planVersion,
       command: 'ASSIGN_WORK',
       body,
     });
     node.status = 'running';
-    this.scheduleWorker(node.workerId);
+    this.scheduleExecutor(node.executorType, node.executorId);
 
     this.wsManager.broadcast(taskId, {
       type: 'worker.status',
       timestamp: new Date().toISOString(),
       data: {
         taskId,
-        workerId: node.workerId,
-        displayName: node.workerId,
+        workerId: node.executorId,
+        displayName: node.executorId,
         status: 'running',
         nodeId: node.id,
       },
     });
   }
 
-  async onWorkerNodeDone(taskId: string, nodeId: string, success: boolean): Promise<void> {
+  private async sendAssignSubplan(taskId: string, ap: ActivePlan, node: TrackedNode): Promise<void> {
+    const correlationId = generateId();
+    const body: Record<string, unknown> = {
+      op: 'ASSIGN_SUBPLAN',
+      brief: (node.brief ?? '').trim(),
+      nodeId: node.id,
+    };
+    this.mailbox.enqueue(node.executorId, {
+      correlationId,
+      planVersion: ap.planVersion,
+      command: 'ASSIGN_SUBPLAN',
+      body,
+    });
+    node.status = 'running';
+    this.scheduleExecutor(node.executorType, node.executorId);
+  }
+
+  private async sendFinalizeSubplan(taskId: string, ap: ActivePlan, node: TrackedNode): Promise<void> {
+    const correlationId = generateId();
+    const childrenPassed = node.childNodeIds.every((id) => ap.nodes.get(id)?.status === 'completed');
+    const body: Record<string, unknown> = {
+      op: 'FINALIZE_SUBPLAN',
+      nodeId: node.id,
+      childSummary: this.buildChildSummary(ap, node),
+      childrenPassed,
+      reviewNotes: node.lastReviewNotes ?? '',
+    };
+    this.mailbox.enqueue(node.executorId, {
+      correlationId,
+      planVersion: ap.planVersion,
+      command: 'FINALIZE_SUBPLAN',
+      body,
+      priority: -10,
+    });
+    node.status = 'reviewing';
+    node.finalizeQueued = true;
+    this.scheduleExecutor(node.executorType, node.executorId);
+  }
+
+  async onWorkerNodeDone(
+    taskId: string,
+    nodeId: string,
+    success: boolean,
+    report?: ProgressReport
+  ): Promise<void> {
     const ap = this.active.get(taskId);
     if (!ap) return;
     const node = ap.nodes.get(nodeId);
     if (!node) return;
     if (node.status !== 'running') return;
 
+    node.lastReport = report;
     node.status = success ? 'reviewing' : 'failed';
 
     await this.eventBus.publish({
@@ -282,9 +475,13 @@ export class OrchestratorService {
         taskId,
         planVersion: ap.planVersion,
         nodeId,
-        workerId: node.workerId,
+        workerId: node.executorId,
+        executorType: node.executorType,
+        executorId: node.executorId,
+        nodeKind: node.nodeKind,
         success,
         reviewAttempts: node.reviewAttempts,
+        report,
       },
     });
 
@@ -293,10 +490,60 @@ export class OrchestratorService {
       timestamp: new Date().toISOString(),
       data: {
         taskId,
-        workerId: node.workerId,
-        displayName: node.workerId,
+        workerId: node.executorId,
+        displayName: node.executorId,
         status: success ? 'reviewing' : 'failed',
         nodeId,
+      },
+    });
+
+    await this.tryLaunchPending(taskId, ap);
+  }
+
+  async onSubmasterNodeDone(
+    taskId: string,
+    nodeId: string,
+    success: boolean,
+    report?: ProgressReport
+  ): Promise<void> {
+    const ap = this.active.get(taskId);
+    if (!ap) return;
+    const node = ap.nodes.get(nodeId);
+    if (!node) return;
+    if (node.status !== 'running' && node.status !== 'reviewing') return;
+
+    node.lastReport = report;
+    node.status = success ? 'reviewing' : 'failed';
+    if (success) {
+      await this.eventBus.publish({
+        type: 'orch.node.completed',
+        timestamp: new Date(),
+        payload: {
+          taskId,
+          planVersion: ap.planVersion,
+          nodeId,
+          submasterId: node.executorId,
+          executorType: node.executorType,
+          executorId: node.executorId,
+          nodeKind: node.nodeKind,
+          success: true,
+          reviewAttempts: node.reviewAttempts,
+          report,
+        },
+      });
+      await this.tryLaunchPending(taskId, ap);
+      return;
+    }
+    await this.eventBus.publish({
+      type: 'orch.node.finalized',
+      timestamp: new Date(),
+      payload: {
+        taskId,
+        planVersion: ap.planVersion,
+        nodeId,
+        submasterId: node.executorId,
+        success,
+        report,
       },
     });
 
@@ -327,22 +574,27 @@ export class OrchestratorService {
           taskId,
           planVersion: ap.planVersion,
           nodeId,
-          workerId: node.workerId,
+          workerId: node.executorId,
+          executorType: node.executorType,
+          executorId: node.executorId,
+          nodeKind: node.nodeKind,
           passed: true,
           reviewAttempts: node.reviewAttempts,
         },
       });
-      this.wsManager.broadcast(taskId, {
-        type: 'worker.status',
-        timestamp: new Date().toISOString(),
-        data: {
-          taskId,
-          workerId: node.workerId,
-          displayName: node.workerId,
-          status: 'completed',
-          nodeId,
-        },
-      });
+      if (node.executorType === 'worker') {
+        this.wsManager.broadcast(taskId, {
+          type: 'worker.status',
+          timestamp: new Date().toISOString(),
+          data: {
+            taskId,
+            workerId: node.executorId,
+            displayName: node.executorId,
+            status: 'completed',
+            nodeId,
+          },
+        });
+      }
       await this.tryLaunchPending(taskId, ap);
       return;
     }
@@ -358,23 +610,52 @@ export class OrchestratorService {
           taskId,
           planVersion: ap.planVersion,
           nodeId,
-          workerId: node.workerId,
+          workerId: node.executorId,
+          executorType: node.executorType,
+          executorId: node.executorId,
+          nodeKind: node.nodeKind,
           passed: false,
           reviewAttempts: node.reviewAttempts,
           terminal: true,
         },
       });
-      this.wsManager.broadcast(taskId, {
-        type: 'worker.status',
-        timestamp: new Date().toISOString(),
-        data: {
+      if (node.executorType === 'worker') {
+        this.wsManager.broadcast(taskId, {
+          type: 'worker.status',
+          timestamp: new Date().toISOString(),
+          data: {
+            taskId,
+            workerId: node.executorId,
+            displayName: node.executorId,
+            status: 'failed',
+            nodeId,
+          },
+        });
+      }
+      await this.tryLaunchPending(taskId, ap);
+      return;
+    }
+
+    if (node.executorType === 'submaster') {
+      node.lastReviewNotes = (verdict.reworkBrief || verdict.notes || '').trim();
+      node.status = 'running';
+      node.finalizeQueued = false;
+      await this.eventBus.publish({
+        type: 'orch.node.reviewed',
+        timestamp: new Date(),
+        payload: {
           taskId,
-          workerId: node.workerId,
-          displayName: node.workerId,
-          status: 'failed',
+          planVersion: ap.planVersion,
           nodeId,
+          submasterId: node.executorId,
+          executorType: node.executorType,
+          executorId: node.executorId,
+          nodeKind: node.nodeKind,
+          passed: false,
+          reviewAttempts: node.reviewAttempts,
         },
       });
+      await this.sendFinalizeSubplan(taskId, ap, node);
       await this.tryLaunchPending(taskId, ap);
       return;
     }
@@ -396,13 +677,30 @@ export class OrchestratorService {
         taskId,
         planVersion: ap.planVersion,
         nodeId,
-        workerId: node.workerId,
+        workerId: node.executorId,
+        executorType: node.executorType,
+        executorId: node.executorId,
+        nodeKind: node.nodeKind,
         passed: false,
         reviewAttempts: node.reviewAttempts,
       },
     });
-    await this.sendAssignWork(taskId, ap, node);
+    await this.assignRunnableNode(taskId, ap, node);
     await this.tryLaunchPending(taskId, ap);
+  }
+
+  private async maybeScheduleSubmasterFinalization(taskId: string, ap: ActivePlan): Promise<void> {
+    for (const node of ap.nodes.values()) {
+      if (node.executorType !== 'submaster') continue;
+      if (!node.childNodeIds.length) continue;
+      if (node.finalizeQueued) continue;
+      if (node.status !== 'running') continue;
+      const children = node.childNodeIds.map((id) => ap.nodes.get(id)).filter(Boolean) as TrackedNode[];
+      if (!children.length) continue;
+      const allSettled = children.every((child) => child.status === 'completed' || child.status === 'failed');
+      if (!allSettled) continue;
+      await this.sendFinalizeSubplan(taskId, ap, node);
+    }
   }
 
   private async maybeFinalizeOrchestration(taskId: string, ap: ActivePlan): Promise<void> {
@@ -421,32 +719,39 @@ export class OrchestratorService {
   async getSnapshot(taskId: string): Promise<{
     taskPlanVersion: number;
     orchestrationState?: string;
-    activePlan?: {
-      planVersion: number;
-      /** 拓扑分层：每层为一批可并行节点 id（与 submit_plan 解析顺序一致） */
-      layers: string[][];
-      nodes: Array<{
-        id: string;
-        workerId: string;
-        status: NodeStatus;
-        brief?: string;
-        dependsOn: string[];
-        parallelGroup?: string;
-      }>;
-    };
+      activePlan?: {
+        planVersion: number;
+        /** 拓扑分层：每层为一批可并行节点 id（与 submit_plan 解析顺序一致） */
+        layers: string[][];
+        nodes: Array<{
+          id: string;
+          executorType: PlanExecutorType;
+          executorId: string;
+          nodeKind: PlanNodeKind;
+          parentNodeId?: string;
+          childNodeIds: string[];
+          status: NodeStatus;
+          brief?: string;
+          dependsOn: string[];
+          parallelGroup?: string;
+          decompositionPolicy?: DecompositionPolicy;
+          lastReport?: ProgressReport;
+          workerId?: string;
+        }>;
+      };
     /** 各工人信箱待处理指令（工人视角即「收件箱」） */
     inboxByWorker: Record<string, MailboxEnvelope[]>;
     mailboxDepths: Record<string, number>;
   }> {
     const task = await this.taskRepo.findById(taskId);
     const agents = await this.agentRepo.findByTaskId(taskId);
-    const workerIds = agents
+    const executorIds = agents
       .filter((a) => a.kind !== 'master' && a.id !== task?.masterAgentId)
       .map((a) => a.id);
 
     const ap = this.active.get(taskId);
-    const mailboxDepths = this.mailbox.depthsForTask(workerIds);
-    const inboxByWorker = this.mailbox.snapshotQueues(workerIds);
+    const mailboxDepths = this.mailbox.depthsForTask(executorIds);
+    const inboxByWorker = this.mailbox.snapshotQueues(executorIds);
 
     return {
       taskPlanVersion: task?.planVersion ?? 0,
@@ -457,11 +762,18 @@ export class OrchestratorService {
             layers: ap.layers.map((layer) => [...layer]),
             nodes: [...ap.nodes.values()].map((n) => ({
               id: n.id,
-              workerId: n.workerId,
+              executorType: n.executorType,
+              executorId: n.executorId,
+              nodeKind: n.nodeKind,
+              parentNodeId: n.parentNodeId,
+              childNodeIds: [...n.childNodeIds],
               status: n.status,
               brief: n.brief,
               dependsOn: n.dependsOn,
               parallelGroup: n.parallelGroup,
+              decompositionPolicy: n.decompositionPolicy,
+              lastReport: n.lastReport,
+              workerId: n.executorType === 'worker' ? n.executorId : undefined,
             })),
           }
         : undefined,
@@ -527,7 +839,46 @@ export class OrchestratorService {
       command,
       body: bodyOut,
     });
-    this.scheduleWorker(targetWorkerId);
+    this.scheduleExecutor('worker', targetWorkerId);
     return { ok: true };
+  }
+
+  private async validatePlanExecutors(
+    task: Task,
+    nodes: Array<{ executorType: PlanExecutorType; executorId: string }>
+  ): Promise<{ ok: true } | { ok: false; error: string }> {
+    const agents = await this.agentRepo.findByTaskId(task.id);
+    const validWorkers = new Set<string>();
+    const validSubmasters = new Set<string>();
+    for (const agent of agents) {
+      if (task.masterAgentId && agent.id === task.masterAgentId) continue;
+      if (agent.kind === 'master') continue;
+      if (agent.kind === 'submaster') {
+        validSubmasters.add(agent.id);
+        continue;
+      }
+      validWorkers.add(agent.id);
+    }
+
+    for (const node of nodes) {
+      if (node.executorType === 'worker' && !validWorkers.has(node.executorId)) {
+        return { ok: false, error: `WORKER_NOT_FOUND: ${node.executorId}` };
+      }
+      if (node.executorType === 'submaster' && !validSubmasters.has(node.executorId)) {
+        return { ok: false, error: `SUBMASTER_NOT_FOUND: ${node.executorId}` };
+      }
+    }
+    return { ok: true };
+  }
+
+  private buildChildSummary(ap: ActivePlan, node: TrackedNode): string {
+    return node.childNodeIds
+      .map((id) => {
+        const child = ap.nodes.get(id);
+        if (!child) return `- ${id}: missing`;
+        const reportSummary = child.lastReport ? summarizeProgressReport(child.lastReport) : '';
+        return `- ${child.id}: ${child.status}${reportSummary ? ` | ${reportSummary}` : ''}`;
+      })
+      .join('\n');
   }
 }

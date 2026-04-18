@@ -1,6 +1,6 @@
 export type AgentStatus = 'idle' | 'running' | 'completed' | 'failed';
 
-export type AgentKind = 'master' | 'worker';
+export type AgentKind = 'master' | 'worker' | 'submaster';
 
 export interface ToolPolicy {
   /** 允许的工具类别（为空/不填表示不按类别限制） */
@@ -21,7 +21,7 @@ export interface Agent {
   id: string;
   taskId: string;
   roleId: string;
-  /** v10：主控会话 vs 工人；缺省按 worker 处理 */
+  /** v10：主控会话 / 工人 / 模块子主控；缺省按 worker 处理 */
   kind?: AgentKind;
   /** v10：工人展示名（主 Agent 无则可为空） */
   displayName?: string;

@@ -2,13 +2,29 @@
  * v10 submit_plan DAG：校验与拓扑分层（Kahn）
  */
 
+export type PlanExecutorType = 'worker' | 'submaster';
+
+export type PlanNodeKind = 'atomic' | 'module';
+
+export type DecompositionPolicy =
+  | 'direct-atomic'
+  | 'stage-first'
+  | 'module-first'
+  | 'domain-first'
+  | 'hybrid';
+
 export interface PlanNodeInput {
   id: string;
-  workerId: string;
+  executorType: PlanExecutorType;
+  executorId: string;
+  nodeKind: PlanNodeKind;
   dependsOn?: string[];
   parallelGroup?: string;
   /** 派工说明（M2 执行 ASSIGN_WORK 用） */
   brief?: string;
+  decompositionPolicy?: DecompositionPolicy;
+  /** 兼容旧前端/旧快照消费者 */
+  workerId?: string;
 }
 
 export interface ParsedPlan {
@@ -30,6 +46,15 @@ export function parsePlanPayload(raw: unknown): { ok: true; plan: ParsedPlan } |
     return { ok: false, error: 'plan.nodes must be a non-empty array' };
   }
   const nodes: PlanNodeInput[] = [];
+  const allowedExecutorTypes = new Set<PlanExecutorType>(['worker', 'submaster']);
+  const allowedNodeKinds = new Set<PlanNodeKind>(['atomic', 'module']);
+  const allowedPolicies = new Set<DecompositionPolicy>([
+    'direct-atomic',
+    'stage-first',
+    'module-first',
+    'domain-first',
+    'hybrid',
+  ]);
   for (const n of nodesRaw) {
     if (!n || typeof n !== 'object') {
       return { ok: false, error: 'each node must be an object' };
@@ -38,20 +63,67 @@ export function parsePlanPayload(raw: unknown): { ok: true; plan: ParsedPlan } |
     if (typeof nr.id !== 'string' || !nr.id.trim()) {
       return { ok: false, error: 'node.id required' };
     }
-    if (typeof nr.workerId !== 'string' || !nr.workerId.trim()) {
-      return { ok: false, error: 'node.workerId required' };
+    const executorTypeRaw =
+      typeof nr.executorType === 'string' && nr.executorType.trim()
+        ? nr.executorType.trim()
+        : 'worker';
+    if (!allowedExecutorTypes.has(executorTypeRaw as PlanExecutorType)) {
+      return { ok: false, error: `unsupported executorType "${executorTypeRaw}" on node "${nr.id}"` };
+    }
+    const executorType = executorTypeRaw as PlanExecutorType;
+    const executorIdRaw =
+      typeof nr.executorId === 'string' && nr.executorId.trim()
+        ? nr.executorId.trim()
+        : typeof nr.workerId === 'string' && nr.workerId.trim()
+          ? nr.workerId.trim()
+          : '';
+    if (!executorIdRaw) {
+      return { ok: false, error: 'node.executorId required (or legacy workerId)' };
+    }
+    const nodeKindRaw =
+      typeof nr.nodeKind === 'string' && nr.nodeKind.trim()
+        ? nr.nodeKind.trim()
+        : executorType === 'submaster'
+          ? 'module'
+          : 'atomic';
+    if (!allowedNodeKinds.has(nodeKindRaw as PlanNodeKind)) {
+      return { ok: false, error: `unsupported nodeKind "${nodeKindRaw}" on node "${nr.id}"` };
+    }
+    const nodeKind = nodeKindRaw as PlanNodeKind;
+    if (executorType === 'worker' && nodeKind !== 'atomic') {
+      return { ok: false, error: `worker executor only supports atomic nodes ("${nr.id}")` };
+    }
+    if (executorType === 'submaster' && nodeKind !== 'module') {
+      return { ok: false, error: `submaster executor only supports module nodes ("${nr.id}")` };
     }
     const dependsOn = Array.isArray(nr.dependsOn)
       ? nr.dependsOn.filter((x): x is string => typeof x === 'string')
       : undefined;
     const parallelGroup = typeof nr.parallelGroup === 'string' ? nr.parallelGroup : undefined;
     const brief = typeof nr.brief === 'string' ? nr.brief : undefined;
+    const decompositionPolicy =
+      typeof nr.decompositionPolicy === 'string' && nr.decompositionPolicy.trim()
+        ? nr.decompositionPolicy.trim()
+        : undefined;
+    if (
+      decompositionPolicy &&
+      !allowedPolicies.has(decompositionPolicy as DecompositionPolicy)
+    ) {
+      return {
+        ok: false,
+        error: `unsupported decompositionPolicy "${decompositionPolicy}" on node "${nr.id}"`,
+      };
+    }
     nodes.push({
       id: nr.id.trim(),
-      workerId: nr.workerId.trim(),
+      executorType,
+      executorId: executorIdRaw,
+      nodeKind,
       dependsOn,
       parallelGroup,
       brief,
+      decompositionPolicy: decompositionPolicy as DecompositionPolicy | undefined,
+      workerId: executorType === 'worker' ? executorIdRaw : undefined,
     });
   }
   const ids = new Set(nodes.map((x) => x.id));

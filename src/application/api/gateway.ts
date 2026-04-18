@@ -617,7 +617,8 @@ export class APIGateway {
                 ...snap.activePlan,
                 nodes: snap.activePlan.nodes.map((n) => ({
                   ...n,
-                  workerDisplayName: workerNames[n.workerId] ?? n.workerId,
+                  executorDisplayName: workerNames[n.executorId] ?? n.executorId,
+                  workerDisplayName: n.workerId ? workerNames[n.workerId] ?? n.workerId : undefined,
                 })),
               }
             : undefined,
