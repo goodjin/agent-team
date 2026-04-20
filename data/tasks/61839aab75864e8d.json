@@ -1,0 +1,20 @@
+{
+  "id": "61839aab75864e8d",
+  "title": "帮我开发一个web版本的terminal",
+  "description": "帮我开发一个web版本的terminal",
+  "status": "running",
+  "role": "task-master",
+  "taskKind": "epic",
+  "depth": 0,
+  "decompositionStatus": "not_decomposed",
+  "dependencies": [],
+  "createdAt": "2026-04-18T08:13:48.257Z",
+  "artifactIds": [],
+  "logIds": [],
+  "subtaskIds": [],
+  "orchestrationMode": "v10-master",
+  "startedAt": "2026-04-18T08:13:48.261Z",
+  "masterAgentId": "4361780d1498408e",
+  "orchestrationState": "intake",
+  "planVersion": 0
+}

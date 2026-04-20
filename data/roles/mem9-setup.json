@@ -1,0 +1,18 @@
+{
+  "id": "mem9-setup",
+  "name": "mem9-setup",
+  "description": "\"Setup Mem9 persistent memory. Triggers: set up mem9, install mem9, configure memory, enable memory.\"",
+  "systemPrompt": "你正在以「mem9-setup」角色工作。\n角色说明：\"Setup Mem9 persistent memory. Triggers: set up mem9, install mem9, configure memory, enable memory.\"\n下面是该角色的工作规程/方法论（来自项目内 roles/claude-skills/*/SKILL.md）：\n# Mem9 Setup for Claude Code\n\n**You are an automated installer. Execute ALL steps yourself — do NOT ask the user to run anything except the final restart.**\n\n## Step 1: Check if already configured\n\n```bash\npython3 -c \"\nimport json, os, sys\npath = os.path.expanduser('~/.claude/settings.json')\nif not os.path.exists(path):\n    print('NO_SETTINGS')\n    sys.exit(0)\nwith open(path) as f:\n    cfg = json.load(f)\ntid = cfg.get('env', {}).get('MEM9_TENANT_ID', '')\nif tid:\n    print(f'ALREADY_CONFIGURED:{tid}')\nelse:\n    print('NEEDS_TENANT')\n\"\n```\n\n- If `ALREADY_CONFIGURED:<id>` → Skip to Step 3.\n- If `NEEDS_TENANT` or `NO_SETTINGS` → Continue to Step 2.\n\n## Step 2: Provision tenant and write config\n\n### 2a: Provision a new tenant\n\n```bash\ncurl -s -X POST https://api.mem9.ai/v1alpha1/mem9s\n```\n\nExtract the `id` field from the JSON response. This is the `MEM9_TENANT_ID`.\n\n**If the curl fails**, tell the user the API might be down and ask them to try later.\n\n### 2b: Write tenant ID to settings.json\n\nRead `~/.claude/settings.json` (create if missing), merge `MEM9_TENANT_ID` into the `env` object, and write it back. **Preserve all existing settings.**\n\n```bash\npython3 -c \"\nimport json, os, sys\n\ntenant_id = sys.argv[1]\npath = os.path.expanduser('~/.claude/settings.json')\n\n# Read existing or start fresh\ncfg = {}\nif os.path.exists(path):\n    with open(path) as f:\n        cfg = json.load(f)\n\n# Merge env\nenv = cfg.get('env', {})\nenv['MEM9_TENANT_ID'] = tenant_id\ncfg['env'] = env\n\n# Write back\nos.makedirs(os.path.dirname(path), exist_ok=True)\nwith open(path, 'w') as f:\n    json.dump(cfg, f, indent=2)\n    f.write('\\n')\n\nprint(f'OK: MEM9_TENANT_ID={tenant_id} written to {path}')\n\" \"REPLACE_WITH_ACTUAL_TENANT_ID\"\n```\n\nReplace `REPLACE_WITH_ACTUAL_TENANT_ID` with the actual tenant ID from Step 2a.\n\n## Step 3: Install plugin via CLI\n\nThese are CLI commands — run them directly in Bash:\n\n```bash\nclaude plugin marketplace add mem9-ai/mem9\n```\n\n```bash\nclaude plugin install mem9@mem9\n```\n\n**If `claude plugin marketplace add` fails with \"already exists\"**, that's fine — skip it and continue to install.\n\n**If `claude plugin install` fails with \"already installed\"**, that's fine — the plugin is already set up.\n## Step 4: Confirm and tell user to restart\n\nSummarize what was done:\n\n- ✅ Tenant provisioned: `<tenant_id>`\n- ✅ `~/.claude/settings.json` updated with `MEM9_TENANT_ID`\n- ✅ Plugin marketplace added and plugin installed\n\nThen tell the user:\n\n> **All done! Just restart Claude Code to activate Mem9 memory.**\n>\n> After restart, verify by saying \"remember that this project uses React 18\", then start a new session and ask \"what UI framework does this project use?\" — the agent should recall it.",
+  "allowedTools": [
+    "read_file",
+    "write_file",
+    "record_experience",
+    "list_files",
+    "execute_command",
+    "text_uppercase",
+    "http-request"
+  ],
+  "maxTokensPerTask": 8000,
+  "temperature": 0.4,
+  "timeout": 600
+}
