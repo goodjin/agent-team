@@ -50,12 +50,34 @@ async function loadOverallRequirementsText(task: Task): Promise<string> {
   return '（尚未写入工作区 docs/REQUIREMENTS.md，且任务描述为空；请 read_file 查看工作区或向主控确认。）';
 }
 
-/** 系统固定派工说明格式：先整体需求正文，再主控下发的节点/派工说明 */
-function formatWorkerAssignBrief(requirementsBody: string, assignmentFromMaster: string): string {
+type AssignmentMeta = {
+  nodeId?: string;
+  parentNodeId?: string;
+  dependsOn?: string[];
+  parallelGroup?: string;
+  decompositionPolicy?: DecompositionPolicy;
+  planVersion?: number;
+};
+
+/** 系统固定派工说明格式：先整体需求正文，再节点信息与主控派工说明 */
+function formatWorkerAssignBrief(
+  requirementsBody: string,
+  assignmentFromMaster: string,
+  meta?: AssignmentMeta
+): string {
   const r = (requirementsBody || '').trim() || '（暂无需求正文）';
   const a =
     (assignmentFromMaster || '').trim() || '（无单独说明，请结合节点 id 与子任务文档执行）';
-  return `整体任务的需求:\n${r}\n\n以下是主控向你派发的任务：\n${a}`;
+  const metaLines: string[] = [];
+  if (meta?.nodeId) metaLines.push(`- 节点ID: ${meta.nodeId}`);
+  if (meta?.parentNodeId) metaLines.push(`- 父节点: ${meta.parentNodeId}`);
+  if (meta?.dependsOn?.length) metaLines.push(`- 依赖: ${meta.dependsOn.join(', ')}`);
+  else if (meta?.nodeId) metaLines.push(`- 依赖: 无`);
+  if (meta?.parallelGroup) metaLines.push(`- 并行组: ${meta.parallelGroup}`);
+  if (meta?.decompositionPolicy) metaLines.push(`- 拆分策略: ${meta.decompositionPolicy}`);
+  if (typeof meta?.planVersion === 'number') metaLines.push(`- planVersion: ${meta.planVersion}`);
+  const metaBlock = metaLines.length ? `\n\n节点信息:\n${metaLines.join('\n')}` : '';
+  return `整体任务的需求:\n${r}${metaBlock}\n\n以下是主控向你派发的任务：\n${a}`;
 }
 
 type NodeStatus = 'pending' | 'running' | 'reviewing' | 'completed' | 'failed';
@@ -369,7 +391,14 @@ export class OrchestratorService {
 
     const reqText = await loadOverallRequirementsText(task);
     const assignment = (node.brief ?? `执行节点 ${node.id}`).trim();
-    const brief = formatWorkerAssignBrief(reqText, assignment);
+    const brief = formatWorkerAssignBrief(reqText, assignment, {
+      nodeId: node.id,
+      parentNodeId: node.parentNodeId,
+      dependsOn: node.dependsOn,
+      parallelGroup: node.parallelGroup,
+      decompositionPolicy: node.decompositionPolicy,
+      planVersion: ap.planVersion,
+    });
 
     const correlationId = generateId();
     const body: Record<string, unknown> = {
@@ -420,6 +449,14 @@ export class OrchestratorService {
       op: 'ASSIGN_SUBPLAN',
       brief: (node.brief ?? '').trim(),
       nodeId: node.id,
+      meta: {
+        nodeId: node.id,
+        parentNodeId: node.parentNodeId,
+        dependsOn: node.dependsOn,
+        parallelGroup: node.parallelGroup,
+        decompositionPolicy: node.decompositionPolicy,
+        planVersion: ap.planVersion,
+      },
     };
     this.mailbox.enqueue(node.executorId, {
       correlationId,
@@ -440,6 +477,14 @@ export class OrchestratorService {
       childSummary: this.buildChildSummary(ap, node),
       childrenPassed,
       reviewNotes: node.lastReviewNotes ?? '',
+      meta: {
+        nodeId: node.id,
+        parentNodeId: node.parentNodeId,
+        dependsOn: node.dependsOn,
+        parallelGroup: node.parallelGroup,
+        decompositionPolicy: node.decompositionPolicy,
+        planVersion: ap.planVersion,
+      },
     };
     this.mailbox.enqueue(node.executorId, {
       correlationId,
@@ -814,9 +859,26 @@ export class OrchestratorService {
       const masterAssignment =
         typeof bodyOut.brief === 'string' ? bodyOut.brief : '（主控未提供 brief）';
       const reqText = await loadOverallRequirementsText(task);
+      const nodeId =
+        typeof bodyOut.nodeId === 'string' && bodyOut.nodeId.trim()
+          ? bodyOut.nodeId.trim()
+          : undefined;
+      const node = nodeId ? this.active.get(taskId)?.nodes.get(nodeId) : undefined;
+      const meta = node
+        ? {
+            nodeId: node.id,
+            parentNodeId: node.parentNodeId,
+            dependsOn: node.dependsOn,
+            parallelGroup: node.parallelGroup,
+            decompositionPolicy: node.decompositionPolicy,
+            planVersion,
+          }
+        : nodeId
+          ? { nodeId, planVersion }
+          : undefined;
       bodyOut = {
         ...bodyOut,
-        brief: formatWorkerAssignBrief(reqText, masterAssignment),
+        brief: formatWorkerAssignBrief(reqText, masterAssignment, meta),
       };
     }
 

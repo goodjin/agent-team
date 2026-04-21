@@ -77,6 +77,11 @@
   → （计划就绪后）ASSIGN_WORK 入队
 ```
 
+### 3.3 提示词与派工上下文
+
+- Master/Worker 提示词统一由 **RoleRepository**（`roles/claude-skills`）生成，主控会优先读取持久化角色提示词。
+- 编排层在 ASSIGN_WORK / ASSIGN_SUBPLAN 中注入节点元信息（`nodeId`、`dependsOn`、`parallelGroup`、`decompositionPolicy`、`planVersion`），保证下游能理解节点位置与拆分策略。
+
 ---
 
 ## 4. 编排与并发

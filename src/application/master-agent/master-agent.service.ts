@@ -87,7 +87,7 @@ export class MasterAgentService {
 
     const existing = await this.agentRepo.findById(masterId);
     if (!existing) {
-      const role = this.roleMatcher.getRole('task-master');
+      const role = (await this.roleRepo.findById('task-master')) ?? this.roleMatcher.getRole('task-master');
       const agent: Agent = {
         id: masterId,
         taskId: task.id,
