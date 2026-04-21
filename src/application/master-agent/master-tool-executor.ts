@@ -203,6 +203,23 @@ const MASTER_CORE_TOOL_DEFINITIONS: ToolDefinition[] = [
   },
 ];
 
+export const MASTER_TOOL_CATEGORY: Record<string, string> = {
+  reply_user: 'communication',
+  create_role: 'orchestration',
+  create_worker: 'orchestration',
+  create_submaster: 'orchestration',
+  submit_plan: 'orchestration',
+  send_worker_command: 'orchestration',
+  query_orchestration_state: 'orchestration',
+  memory_search: 'memory',
+  memory_append: 'memory',
+  memory_summarize: 'memory',
+  read_file: 'workspace',
+  write_file: 'workspace',
+  list_files: 'workspace',
+  complete_task: 'orchestration',
+};
+
 /** 主控可用：编排/记忆/回复 + 任务工作区内文件读写 */
 export const MASTER_TOOL_DEFINITIONS: ToolDefinition[] = [
   ...MASTER_CORE_TOOL_DEFINITIONS,

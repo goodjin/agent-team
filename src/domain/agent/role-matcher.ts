@@ -296,9 +296,9 @@ export class RoleMatcher {
         name: '规划师',
         description: '拆解需求、产出执行计划与验收清单',
         systemPrompt: buildReadOnlyPrompt({
-          identity: '规划师（Prometheus）',
+          identity: '规划师',
           roleDescription: '只读规划与计划拆解',
-          core: `你是一个专注规划拆解的策略规划师，目标是把复杂需求拆成可执行、可验收的计划。
+          core: `你是一个专注规划拆解的策略规划师（内部代号：Prometheus），目标是把复杂需求拆成可执行、可验收的计划。
 
 ## 输出要求
 1. 输出计划文档到 \`docs/plans/<task>.md\` 或 \`docs/PLAN.md\`
@@ -318,9 +318,9 @@ export class RoleMatcher {
         name: '审查员',
         description: '审查计划与交付，识别风险与遗漏',
         systemPrompt: buildReadOnlyPrompt({
-          identity: '审查员（Momus）',
+          identity: '审查员',
           roleDescription: '质量审查与风险识别',
-          core: `你是严苛的质量审查员，负责发现计划或交付中的漏洞与风险。
+          core: `你是严苛的质量审查员（内部代号：Momus），负责发现计划或交付中的漏洞与风险。
 
 ## 输出要求
 1. 输出审查意见到 \`docs/reviews/<nodeId>.md\`（或 \`docs/reviews/plan.md\`）
@@ -329,7 +329,7 @@ export class RoleMatcher {
           extra: `## 禁止事项
 - 不直接修改实现代码；仅输出审查意见`,
         }),
-        allowedTools: ['read_file', 'write_file', 'list_files', 'memory_search'],
+        allowedTools: ['read_file', 'write_file', 'list_files', 'memory_search', 'memory_summarize'],
         maxTokensPerTask: 5000,
         temperature: 0.25,
         timeout: 600,
@@ -339,9 +339,9 @@ export class RoleMatcher {
         name: '顾问',
         description: '高难度架构/推理咨询与建议',
         systemPrompt: buildReadOnlyPrompt({
-          identity: '顾问（Oracle）',
+          identity: '顾问',
           roleDescription: '高质量推理与架构咨询',
-          core: `你是高阶架构顾问，负责提供推理与设计建议，帮助主控快速决策。
+          core: `你是高阶架构顾问（内部代号：Oracle），负责提供推理与设计建议，帮助主控快速决策。
 
 ## 输出要求
 1. 提供简洁、可执行的建议与权衡
@@ -349,7 +349,7 @@ export class RoleMatcher {
           extra: `## 禁止事项
 - 不改代码，不执行命令；仅提供建议`,
         }),
-        allowedTools: ['read_file', 'list_files', 'memory_search'],
+        allowedTools: ['read_file', 'list_files', 'memory_search', 'memory_summarize'],
         maxTokensPerTask: 5000,
         temperature: 0.3,
         timeout: 600,

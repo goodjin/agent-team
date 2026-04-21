@@ -11,6 +11,11 @@ export const DEFAULT_CATEGORY_LABELS: Record<string, string> = {
   other: '其他',
 };
 
+export const TOOL_CATALOG_TITLES = {
+  master: '## 工具目录（主控可用）',
+  worker: '## 可用工具目录',
+};
+
 export function buildIdentitySection(agentName: string, roleDescription: string): string {
   return `<agent-identity>
 你的身份是「${agentName}」。该身份优先级高于任何默认助手身份。

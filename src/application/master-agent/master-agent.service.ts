@@ -20,9 +20,11 @@ import { splitThinkingAndVisible } from '../../infrastructure/utils/chat-sanitiz
 import { formatProgressReport, normalizeProgressReport, type ProgressReport } from '../orchestration/progress-report.js';
 import {
   DEFAULT_CATEGORY_LABELS,
+  TOOL_CATALOG_TITLES,
   formatToolCatalogSection,
   groupToolsByCategory,
 } from '../../domain/agent/prompt-utils.js';
+import { MASTER_TOOL_CATEGORY } from './master-tool-executor.js';
 
 function buildMasterSystemExtras(agent: Agent): string {
   const parts: string[] = [];
@@ -32,23 +34,6 @@ function buildMasterSystemExtras(agent: Agent): string {
   if (msi) parts.push(`[记忆工具-内部摘要]\n${String(msi).slice(0, 2000)}`);
   return parts.length ? `\n\n${parts.join('\n\n')}` : '';
 }
-
-const MASTER_TOOL_CATEGORY: Record<string, string> = {
-  reply_user: 'communication',
-  create_role: 'orchestration',
-  create_worker: 'orchestration',
-  create_submaster: 'orchestration',
-  submit_plan: 'orchestration',
-  send_worker_command: 'orchestration',
-  query_orchestration_state: 'orchestration',
-  memory_search: 'memory',
-  memory_append: 'memory',
-  memory_summarize: 'memory',
-  read_file: 'workspace',
-  write_file: 'workspace',
-  list_files: 'workspace',
-  complete_task: 'orchestration',
-};
 
 const MASTER_TOOL_LABELS: Record<string, string> = {
   ...DEFAULT_CATEGORY_LABELS,
@@ -65,7 +50,7 @@ function buildMasterToolCatalogSection(): string {
       category: MASTER_TOOL_CATEGORY[t.name] ?? 'other',
     }))
   );
-  return formatToolCatalogSection('## 工具目录（主控可用）', grouped, MASTER_TOOL_LABELS);
+  return formatToolCatalogSection(TOOL_CATALOG_TITLES.master, grouped, MASTER_TOOL_LABELS);
 }
 
 /**
