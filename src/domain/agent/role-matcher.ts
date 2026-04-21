@@ -59,6 +59,10 @@ const MASTER_HARD_BLOCKS = buildHardBlockSection('硬性禁令', [
 
 const MASTER_ANTI_DUP = buildAntiDuplicationSection();
 
+/**
+ * Build a worker system prompt by combining identity, core guidance, optional extras,
+ * and shared worker appendices.
+ */
 function buildWorkerPrompt(options: {
   identity: string;
   roleDescription: string;
@@ -71,6 +75,10 @@ function buildWorkerPrompt(options: {
   return parts.join('\n\n');
 }
 
+/**
+ * Build a read-only role prompt by combining identity, core guidance, optional extras,
+ * and read-only constraints.
+ */
 function buildReadOnlyPrompt(options: {
   identity: string;
   roleDescription: string;

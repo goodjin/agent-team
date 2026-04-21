@@ -43,6 +43,9 @@ const MASTER_TOOL_LABELS: Record<string, string> = {
   communication: '用户沟通',
 };
 
+/**
+ * Build a formatted tool catalog section for master agents.
+ */
 function buildMasterToolCatalogSection(): string {
   const grouped = groupToolsByCategory(
     MASTER_TOOL_DEFINITIONS.map((t) => ({

@@ -24,6 +24,9 @@ export function buildIdentitySection(agentName: string, roleDescription: string)
 </agent-identity>`;
 }
 
+/**
+ * Group tools by category, optionally filtering by a list of allowed tool names.
+ */
 export function groupToolsByCategory(
   tools: Array<{ name: string; category?: string }>,
   allowNames?: Iterable<string>
@@ -42,6 +45,9 @@ export function groupToolsByCategory(
   return grouped;
 }
 
+/**
+ * Format a grouped tool catalog into a markdown section.
+ */
 export function formatToolCatalogSection(
   title: string,
   grouped: Map<string, string[]>,
@@ -59,11 +65,17 @@ export function formatToolCatalogSection(
   return lines.join('\n');
 }
 
+/**
+ * Build a markdown section that lists hard-block rules as bullets.
+ */
 export function buildHardBlockSection(title: string, items: string[]): string {
   if (!items.length) return '';
   return `## ${title}\n${items.map((item) => `- ${item}`).join('\n')}`;
 }
 
+/**
+ * Return guidance text to avoid duplicated execution after delegation.
+ */
 export function buildAntiDuplicationSection(): string {
   return `## 反重复执行原则
 - 若已将探索/实现委派给下级（worker/submaster），**不要**重复做同一件事；请等待汇报或通过 query_orchestration_state 拉取状态。
