@@ -46,6 +46,7 @@
 | `domain/role/` | `Role` 实体、`IRoleRepository` |
 | `domain/agent/` | 扩展 `Agent`：`kind`, `displayName`, `masterAgentId`, `mailboxSeq` |
 | `application/master-agent/` | `MasterSession`, `MasterAgentService`, 主工具适配 |
+| `application/review/` | 计划/产出审查服务（Intent Gate + Plan Review） |
 | `application/orchestrator/` | `OrchestratorService`：下达节点、收集完成、触发并行层 |
 | `application/worker-runner/` | 从信箱取指令、运行 ReAct、回写进度 |
 | `application/context/` | `TokenEstimator`, `ContextCompressor`, `MemoryToolProvider` |
@@ -76,6 +77,17 @@
   → Orchestrator.registerWorker(workerId)
   → （计划就绪后）ASSIGN_WORK 入队
 ```
+
+### 3.3 Intent Gate & Plan Review
+
+```
+用户消息 → MasterAgentService.IntentGate（意图/复杂度分类）
+  → 若需规划：产出 docs/plans/plan-<版本>.md
+  → 可选 review_plan → 通过后 submit_plan
+```
+
+- Intent Gate 仅做轻量分类，最终决策仍由主控结合上下文判断。
+- Plan Review 以 JSON 产出问题清单，便于快速修订与复审。
 
 ---
 

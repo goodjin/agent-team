@@ -18,6 +18,8 @@ import { MasterToolExecutor, MASTER_TOOL_DEFINITIONS } from './master-tool-execu
 import { formatLLMProviderError, llmErrorMetadata } from '../../infrastructure/llm/error-format.js';
 import { splitThinkingAndVisible } from '../../infrastructure/utils/chat-sanitize.js';
 import { formatProgressReport, normalizeProgressReport, type ProgressReport } from '../orchestration/progress-report.js';
+import { classifyIntent, formatIntentGate } from './intent-gate.js';
+import type { PlanReviewService } from '../review/plan-review.service.js';
 
 function buildMasterSystemExtras(agent: Agent): string {
   const parts: string[] = [];
@@ -25,6 +27,10 @@ function buildMasterSystemExtras(agent: Agent): string {
   if (idg) parts.push(`[内部状态累积摘要]\n${String(idg).slice(0, 4000)}`);
   const msi = agent.context.variables?.memorySummaryInternal;
   if (msi) parts.push(`[记忆工具-内部摘要]\n${String(msi).slice(0, 2000)}`);
+  const intentGate = agent.context.variables?.intentGate;
+  if (intentGate) {
+    parts.push(`[IntentGate]\n${formatIntentGate(intentGate)}`);
+  }
   return parts.length ? `\n\n${parts.join('\n\n')}` : '';
 }
 
@@ -48,7 +54,8 @@ export class MasterAgentService {
     private orchestrator: OrchestratorService,
     private contextCompressor: ContextCompressor,
     memoryHandlers: MemoryToolHandlers,
-    toolRegistry: ToolRegistry
+    toolRegistry: ToolRegistry,
+    planReviewService: PlanReviewService
   ) {
     this.toolExecutor = new MasterToolExecutor(
       agentRepo,
@@ -58,7 +65,8 @@ export class MasterAgentService {
       wsManager,
       memoryHandlers,
       this.logger,
-      toolRegistry
+      toolRegistry,
+      planReviewService
     );
   }
 
@@ -217,6 +225,25 @@ export class MasterAgentService {
       type: 'master.message.appended',
       timestamp: new Date(),
       payload: { taskId, role: 'user', contentLength: content.length },
+    });
+
+    const intentGate = classifyIntent({
+      content,
+      taskTitle: task.title,
+      taskDescription: task.description || '',
+    });
+    agent.context.variables.intentGate = intentGate;
+    await this.eventBus.publish({
+      type: 'master.intent.classified',
+      timestamp: new Date(),
+      payload: {
+        taskId,
+        agentId: agent.id,
+        intent: intentGate.intent,
+        complexity: intentGate.complexity,
+        suggestedMode: intentGate.suggestedMode,
+        reasons: intentGate.reasons,
+      },
     });
 
     await this.contextCompressor.maybeCompressMasterHistory(agent);

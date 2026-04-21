@@ -23,8 +23,10 @@
 | T1.2 | `MasterSession` 存储 | 消息列表 CRUD，绑定 `taskId` + `masterAgentId` |
 | T1.3 | WebSocket：`user.message` | 见 [04](./04-api-events-contracts.md)；广播 `master.thinking` / `master.reply` |
 | T1.4 | `MasterAgentService` 骨架 | 轻量 ReAct（少工具），默认工具：回复用户、（stub）`submit_plan` |
-| T1.5 | `AgentExecutionEngine` 支持 `AbortSignal` | Worker 路径可中断循环；与现有 v9 引擎兼容 |
-| T1.6 | `TaskService.start` 分支 | `v10` 模式：不调用原 `execute` 整树，改为 `startMasterSession` |
+| T1.5 | Intent Gate | 用户意图/复杂度轻量分类，提示是否进入规划模式 |
+| T1.6 | Plan Review 工具 | 对规划文档做质量门禁（JSON 输出） |
+| T1.7 | `AgentExecutionEngine` 支持 `AbortSignal` | Worker 路径可中断循环；与现有 v9 引擎兼容 |
+| T1.8 | `TaskService.start` 分支 | `v10` 模式：不调用原 `execute` 整树，改为 `startMasterSession` |
 
 **验收**：新任务创建后，用户 WS 多轮对话有持久化；演示一次 Worker 级 abort（可单 Worker  stub）。
 

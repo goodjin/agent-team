@@ -30,6 +30,7 @@ import { PostmortemService } from './application/ops/postmortem.service.js';
 import { ExperienceCuratorService } from './application/experience/experience-curator.service.js';
 import { ReviewGateService } from './application/review/review-gate.service.js';
 import { ReviewRoleMappingStore } from './application/review/review-role-mapping.store.js';
+import { PlanReviewService } from './application/review/plan-review.service.js';
 import { registerPluginToolsOnRegistry } from './application/bootstrap/plugin-tools.js';
 import { seedRolesFromProjectSkills } from './application/bootstrap/seed-roles-from-project-skills.js';
 import { seedSystemRoles } from './application/bootstrap/seed-system-roles.js';
@@ -289,7 +290,8 @@ export async function createContainer(dataPath: string = './data'): Promise<Cont
     orchestratorService,
     contextCompressor,
     memoryToolHandlers,
-    toolRegistry
+    toolRegistry,
+    new PlanReviewService(roleRepo, llmService, logger)
   );
   const subMasterRunner = new SubMasterRunner(
     workerMailbox,

@@ -16,6 +16,8 @@ const LAYOUT_MD = `# 任务工作空间目录约定
 | \`docs/CHANGE_LOG.md\` | **变更与审计记录**：需求变更、计划重排、重大决策先记录再行动 |
 | \`docs/modules/\` | 模块级任务说明（复杂任务第一层适合放这里） |
 | \`docs/subtasks/\` | 各原子子任务说明（如 \`<nodeId>.md\`） |
+| \`docs/plans/\` | 规划文档（主控/规划角色输出，建议版本化保存） |
+| \`docs/notepads/\` | 规划与执行过程的 learnings / decisions / issues / verification |
 | \`docs/notes/\` | 过程笔记、会议结论 |
 | \`deliverables/\` | 对外交付物（构建产物、发布包等） |
 | \`reports/\` | 报告、复盘、验证记录 |
@@ -99,6 +101,8 @@ export async function ensureTaskWorkspaceLayout(taskId: string): Promise<void> {
   const subdirs = [
     'docs/modules',
     'docs/subtasks',
+    'docs/plans',
+    'docs/notepads',
     'docs/notes',
     'deliverables',
     'reports',

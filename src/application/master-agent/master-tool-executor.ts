@@ -16,6 +16,7 @@ import type { ToolRegistry, ToolContext } from '../../domain/tool/index.js';
 import { builtinTools } from '../../domain/tool/index.js';
 import type { TaskService } from '../task/task.service.js';
 import { isReservedSystemRoleId } from '../bootstrap/seed-system-roles.js';
+import type { PlanReviewService } from '../review/plan-review.service.js';
 import * as path from 'path';
 import { mkdir } from 'fs/promises';
 
@@ -188,6 +189,19 @@ const MASTER_CORE_TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
+    name: 'review_plan',
+    description:
+      '对计划文档进行 Momus 风格质量审查（清晰性/可验证性/上下文/一致性）。先 write_file 保存计划，再传 planPath（相对任务工作区根目录）。返回 JSON: {passed, summary, issues, next_action}。',
+    parameters: {
+      type: 'object',
+      properties: {
+        planPath: { type: 'string', description: '计划文档路径（相对任务工作区根目录）' },
+        planContent: { type: 'string', description: '可选：直接传入计划正文' },
+        focus: { type: 'string', description: '可选：本次评审关注点' },
+      },
+    },
+  },
+  {
     name: 'complete_task',
     description:
       '将当前任务标记为已完成（仅当任务 status 为 running 时可用）。请先与用户对齐交付与验收，用 reply_user 说明结案，再调用本工具。调用后系统会异步触发「经验归档员」基于主控对话、复盘快照与文档生成全局总结，写入 docs/CLOSURE_EXPERIENCE.md 与团队经验库。',
@@ -221,7 +235,8 @@ export class MasterToolExecutor {
     private wsManager: WebSocketManager,
     private memoryHandlers: MemoryToolHandlers,
     private logger: ILogger,
-    private toolRegistry: ToolRegistry
+    private toolRegistry: ToolRegistry,
+    private planReviewService: PlanReviewService
   ) {}
 
   /** 在 TaskService 实例化后注入，避免与 MasterAgentService 构造环依赖 */
@@ -286,6 +301,8 @@ export class MasterToolExecutor {
               typeof args.appendMemory === 'boolean' ? args.appendMemory : undefined,
           }
         );
+      case 'review_plan':
+        return this.reviewPlan(args, ctx);
       case 'read_file':
       case 'write_file':
       case 'list_files':
@@ -502,6 +519,24 @@ export class MasterToolExecutor {
     });
 
     return { ok: true, submasterId };
+  }
+
+  private async reviewPlan(
+    args: Record<string, unknown>,
+    ctx: MasterToolContext
+  ): Promise<{ ok: true; verdict: unknown } | { error: string }> {
+    const planPath = typeof args.planPath === 'string' ? args.planPath.trim() : '';
+    const planContent = typeof args.planContent === 'string' ? args.planContent.trim() : '';
+    if (!planPath && !planContent) {
+      return { error: 'planPath or planContent required' };
+    }
+    const verdict = await this.planReviewService.reviewPlan({
+      taskId: ctx.taskId,
+      planPath: planPath || undefined,
+      planContent: planContent || undefined,
+      focus: typeof args.focus === 'string' ? args.focus : undefined,
+    });
+    return { ok: true, verdict };
   }
 
   private async submitPlan(

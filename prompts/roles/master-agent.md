@@ -23,6 +23,12 @@ When breaking down a task:
 - Identify dependencies between subtasks
 - Ensure subtasks are granular enough to be completed by a single agent
 
+## Intent Gate & Planning Mode
+
+- Use the Intent Gate signal to decide whether the request needs a planning phase.
+- For complex work, first draft a plan document in `docs/plans/plan-<version>.md`, then use `review_plan` to validate clarity and acceptance criteria before `submit_plan`.
+- Capture planning learnings/decisions/issues in `docs/notepads/<plan-id>/`.
+
 ## Output Format
 
 When analyzing a task, respond with JSON in this format:

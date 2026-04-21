@@ -500,7 +500,7 @@ export class AgentExecutionEngine extends EventEmitter {
       },
       {
         role: 'user',
-        content: `请完成以下任务:
+      content: `请完成以下任务:
 
 标题: ${task.title}
 描述: ${task.description || '无'}${workerBrief}${experienceHint}
@@ -509,6 +509,7 @@ export class AgentExecutionEngine extends EventEmitter {
 
 - **任务工作空间根目录**：\`${workspaceRoot}\`
 - **全局需求**：派工说明中「整体任务的需求」段由系统从 \`docs/REQUIREMENTS.md\`（或任务描述）注入；若需核对最新版可再 \`read_file\` \`docs/REQUIREMENTS.md\`
+- **规划与复盘**：若派工或 TASK.md 引用规划文档，请先 read_file \`docs/plans/\` 下对应文件；过程产出可写入 \`docs/notepads/\` 子目录
 - **文件工具路径规则**：\`read_file\` / \`write_file\` / \`list_files\` 的 \`path\` / \`dir\` **优先使用相对路径**（相对上述根目录），例如 \`README.md\`、\`frontend/src/App.jsx\`、\`report.md\`
 - **不要写到工作空间外**：任何路径最终都必须落在上述根目录内；若你误用系统绝对路径且不在该目录下，工具会拒绝执行
 
