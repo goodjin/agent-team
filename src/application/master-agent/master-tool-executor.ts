@@ -214,9 +214,9 @@ export const MASTER_TOOL_CATEGORY: Record<string, string> = {
   memory_search: 'memory',
   memory_append: 'memory',
   memory_summarize: 'memory',
-  read_file: 'workspace',
-  write_file: 'workspace',
-  list_files: 'workspace',
+  read_file: 'file',
+  write_file: 'file',
+  list_files: 'file',
   complete_task: 'orchestration',
 };
 

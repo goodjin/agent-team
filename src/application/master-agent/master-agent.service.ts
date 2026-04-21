@@ -37,7 +37,7 @@ function buildMasterSystemExtras(agent: Agent): string {
 
 const MASTER_TOOL_LABELS: Record<string, string> = {
   ...DEFAULT_CATEGORY_LABELS,
-  workspace: '工作区文件',
+  file: '工作区文件',
   orchestration: '编排',
   memory: '记忆',
   communication: '用户沟通',

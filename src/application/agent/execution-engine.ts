@@ -489,7 +489,9 @@ export class AgentExecutionEngine extends EventEmitter {
     const allowedTools = selectAllowedTools(this.toolRegistry.list(), agent.toolPolicy);
     const toolCatalog = formatToolCatalogSection(
       TOOL_CATALOG_TITLES.worker,
-      groupToolsByCategory(allowedTools)
+      groupToolsByCategory(
+        allowedTools.map((tool) => ({ name: tool.name, category: tool.category }))
+      )
     );
     const systemPrompt = toolCatalog
       ? `${agent.context.systemPrompt}\n\n${toolCatalog}`
