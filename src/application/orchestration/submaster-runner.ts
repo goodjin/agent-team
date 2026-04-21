@@ -18,7 +18,12 @@ function buildSubmasterAssignPrompt(nodeId: string, brief: string): string {
 4. 你不直接面向最终用户；reply_user 仅作为给上一级主控的本轮总结。
 
 模块说明：
-${detail}`;
+${detail}
+
+分层协作参考：
+- 需求或边界不清时，先派 planner 产出 \`docs/plans/${nodeId}.md\`，再决定子计划。
+- 关键方案或高风险变更，先派 reviewer 生成 \`docs/reviews/${nodeId}.md\` 再执行。
+- 执行阶段优先拆成可验收的原子节点；保持 brief 与 docs/REQUIREMENTS.md 对齐。`;
 }
 
 function buildSubmasterFinalizePrompt(
@@ -34,6 +39,7 @@ function buildSubmasterFinalizePrompt(
 1. 复核模块目标是否达成。
 2. 默认不要再次 submit_plan；若审查意见明确要求补充模块说明或重新组织直属子节点结论，请先处理这些问题，再给出最新模块汇报。
 3. reply_user 仅作为给上一级主控的简短汇报。
+4. 若已有 reviewer 产出的审查文档，请纳入结论与风险说明。
 
 子节点状态：
 ${childSummary || '（无子节点摘要）'}

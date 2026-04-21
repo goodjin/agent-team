@@ -8,6 +8,7 @@ import { IEventBus } from '../../infrastructure/event-bus/index.js';
 import type { ContextCompressor } from '../memory/context-compressor.js';
 import { formatLLMProviderError, llmErrorMetadata } from '../../infrastructure/llm/error-format.js';
 import * as path from 'path';
+import { formatToolCatalogSection, groupToolsByCategory } from '../../domain/agent/prompt-utils.js';
 
 /** DomainEvent `agent.execution.finished` 的 payload，供 SelfEvaluator / 记忆等订阅 */
 export interface AgentExecutionFinishedPayload {
@@ -481,6 +482,14 @@ export class AgentExecutionEngine extends EventEmitter {
 
   private buildInitialMessages(agent: Agent, task: Task): Message[] {
     const workspaceRoot = path.resolve(process.cwd(), `data/workspaces/${task.id}`);
+    const allowedTools = selectAllowedTools(this.toolRegistry.list(), agent.toolPolicy);
+    const toolCatalog = formatToolCatalogSection(
+      '## 可用工具目录',
+      groupToolsByCategory(allowedTools)
+    );
+    const systemPrompt = toolCatalog
+      ? `${agent.context.systemPrompt}\n\n${toolCatalog}`
+      : agent.context.systemPrompt;
     const workerBrief =
       agent.kind === 'worker' &&
       typeof agent.context.variables?.workerBrief === 'string' &&
@@ -496,7 +505,7 @@ export class AgentExecutionEngine extends EventEmitter {
     return [
       {
         role: 'system',
-        content: agent.context.systemPrompt,
+        content: systemPrompt,
       },
       {
         role: 'user',

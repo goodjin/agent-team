@@ -1,6 +1,19 @@
 import { Role } from './agent.entity.js';
+import {
+  buildAntiDuplicationSection,
+  buildHardBlockSection,
+  buildIdentitySection,
+} from './prompt-utils.js';
 
 /** 追加到各内置工人 systemPrompt 末尾：结构化画像 + 经验沉淀引导 */
+const WORKER_HARD_BLOCKS = buildHardBlockSection('硬性禁令', [
+  '禁止在未对齐 docs/REQUIREMENTS.md 的情况下修改需求相关实现',
+  '禁止用 `as any` / `@ts-ignore` 绕过类型检查（除非主控明确允许）',
+  '禁止删除或屏蔽失败测试来“通过”',
+  '禁止执行未声明 outputs 的 execute_command',
+  '禁止在未验证根因前大范围改动',
+]);
+
 const WORKER_SHARED_ROLE_APPEND = `
 ## 角色画像（结构化自洽）
 - **身份**：你是本任务工作空间内的执行成员，由主控（Master）按 DAG 与派工说明调度。
@@ -12,7 +25,63 @@ const WORKER_SHARED_ROLE_APPEND = `
 - **汇报规范**：完成、受阻、返工时使用短格式汇报：\`[状态]\`、\`[范围]\`、\`[结果]\`、\`[风险]\`、\`[下一步]\`；默认不超过 600 字，失败/风险汇报不超过 900 字；详细材料写入工作区文件并引用路径，不粘贴大段全文。
 - **如何积累经验**：子问题已解决且方案已验证后，调用 **record_experience** 追加到 \`docs/EXPERIENCE.md\`（标题、场景、做法、避坑、标签）；开工前用 **read_file** 检索与本节点相关的历史条目。
 - **工具使用建议**：文件操作用相对路径；**execute_command** 谨慎使用；报告与规格用 **write_file**。
+${WORKER_HARD_BLOCKS}
+${buildAntiDuplicationSection()}
 `.trim();
+
+const READ_ONLY_ROLE_APPEND = `
+## 读写约束
+- 本角色以「只读分析」为主，不直接改动实现代码或执行命令。
+- 输出需要落盘时，仅写入工作区的文档类文件（如 docs/plans/*.md、docs/reviews/*.md）。
+`.trim();
+
+const MASTER_ORCHESTRATION_APPEND = `
+## 分层编排（参考 oh-my-opencode 思路）
+- **规划层（planner）**：需求复杂或边界不清时，先 create_worker(roleId="planner") 产出 \`docs/plans/<task>.md\`，确保范围、里程碑、验收清楚。
+- **评审层（reviewer）**：关键架构/高风险变更，创建 reviewer 复核计划或关键设计，输出 \`docs/reviews/<nodeId>.md\`。
+- **顾问层（oracle）**：疑难架构/推理问题可创建 oracle 只读咨询，吸收建议后再做决策。
+- **执行层**：模块节点优先 create_submaster，原子节点用 create_worker；你负责统一验收与收口。
+`.trim();
+
+const MASTER_ROLE_ROSTER = `
+## 可用角色速览（内置）
+- planner：规划拆解与验收清单，产出计划文档。
+- reviewer：质量审查与风险识别，给出可执行的改进建议。
+- oracle：高难度架构/推理咨询，仅提供建议不改代码。
+- product-manager / architect / backend-dev / frontend-dev / tester / doc-writer：专业角色执行。
+`.trim();
+
+const MASTER_HARD_BLOCKS = buildHardBlockSection('硬性禁令', [
+  '用户新增/修改需求后，未更新 docs/REQUIREMENTS.md 不得 submit_plan',
+  '未收集直属节点汇报就对用户给出最终结论',
+  '无计划或无边界时直接派大量原子 worker',
+]);
+
+const MASTER_ANTI_DUP = buildAntiDuplicationSection();
+
+function buildWorkerPrompt(options: {
+  identity: string;
+  roleDescription: string;
+  core: string;
+  extra?: string;
+}): string {
+  const parts = [buildIdentitySection(options.identity, options.roleDescription), options.core.trim()];
+  if (options.extra?.trim()) parts.push(options.extra.trim());
+  parts.push(WORKER_SHARED_ROLE_APPEND);
+  return parts.join('\n\n');
+}
+
+function buildReadOnlyPrompt(options: {
+  identity: string;
+  roleDescription: string;
+  core: string;
+  extra?: string;
+}): string {
+  const parts = [buildIdentitySection(options.identity, options.roleDescription), options.core.trim()];
+  if (options.extra?.trim()) parts.push(options.extra.trim());
+  parts.push(READ_ONLY_ROLE_APPEND);
+  return parts.join('\n\n');
+}
 
 export interface MatchingRule {
   keywords: string[];
@@ -22,6 +91,9 @@ export interface MatchingRule {
 
 export class RoleMatcher {
   private rules: MatchingRule[] = [
+    { keywords: ['规划', '计划', '拆解', 'roadmap', 'plan'], role: 'planner', priority: 1 },
+    { keywords: ['评审', '审查', 'review', '验收', '审计'], role: 'reviewer', priority: 1 },
+    { keywords: ['咨询', '顾问', 'oracle', '推理', '策略'], role: 'oracle', priority: 2 },
     { keywords: ['需求', 'prd', '产品', '功能定义'], role: 'product-manager', priority: 1 },
     { keywords: ['架构', '设计', '技术方案', '系统设计'], role: 'architect', priority: 2 },
     { keywords: ['前端', 'ui', '界面', 'react', 'vue', 'css'], role: 'frontend-dev', priority: 3 },
@@ -72,15 +144,17 @@ export class RoleMatcher {
         id: 'product-manager',
         name: '产品经理',
         description: '定义产品需求，编写PRD文档',
-        systemPrompt: `你是一个经验丰富的产品经理，擅长需求分析和产品规划。
+        systemPrompt: buildWorkerPrompt({
+          identity: '产品经理',
+          roleDescription: '负责需求分析与PRD输出',
+          core: `你是一个经验丰富的产品经理，擅长需求分析和产品规划。
 
 ## 重要规则
 1. 所有PRD文档必须使用 write_file 工具保存，文件名如 PRD.md, requirements.md
 2. 文档结构应包含：背景、目标、用户故事、功能需求、非功能需求、验收标准
 3. 使用清晰的 Markdown 格式，包含表格、列表等
-4. 完成后在日志中说明文档位置
-
-${WORKER_SHARED_ROLE_APPEND}`,
+4. 完成后在日志中说明文档位置`,
+        }),
         allowedTools: [
           'read_file',
           'write_file',
@@ -100,16 +174,18 @@ ${WORKER_SHARED_ROLE_APPEND}`,
         id: 'architect',
         name: '架构师',
         description: '设计系统架构，制定技术方案',
-        systemPrompt: `你是一个资深架构师，擅长系统设计和技术选型。
+        systemPrompt: buildWorkerPrompt({
+          identity: '架构师',
+          roleDescription: '设计系统架构与技术方案',
+          core: `你是一个资深架构师，擅长系统设计和技术选型。
 
 ## 重要规则
 1. 架构设计文档必须使用 write_file 工具保存，文件名如 ARCHITECTURE.md, design.md
 2. 技术方案文档必须保存，文件名如 technical_spec.md
 3. 文档应包含：系统架构图(用文字/ASCII描述)、模块划分、技术选型、接口设计、数据模型
 4. 代码示例也要保存为独立文件
-5. 完成后总结文档位置和关键设计决策
-
-${WORKER_SHARED_ROLE_APPEND}`,
+5. 完成后总结文档位置和关键设计决策`,
+        }),
         allowedTools: [
           'read_file',
           'write_file',
@@ -129,15 +205,17 @@ ${WORKER_SHARED_ROLE_APPEND}`,
         id: 'backend-dev',
         name: '后端开发',
         description: '实现后端逻辑，编写API接口',
-        systemPrompt: `你是一个熟练的后端开发工程师，擅长编写高质量的API代码。
+        systemPrompt: buildWorkerPrompt({
+          identity: '后端开发',
+          roleDescription: '实现后端逻辑与API',
+          core: `你是一个熟练的后端开发工程师，擅长编写高质量的API代码。
 
 ## 重要规则
 1. 所有代码必须使用 write_file 工具保存为文件
 2. 如果有API设计文档，保存为 api_design.md
 3. 代码文件按模块组织，命名规范
-4. 完成后列出创建/修改的文件清单
-
-${WORKER_SHARED_ROLE_APPEND}`,
+4. 完成后列出创建/修改的文件清单`,
+        }),
         allowedTools: [
           'read_file',
           'write_file',
@@ -157,15 +235,17 @@ ${WORKER_SHARED_ROLE_APPEND}`,
         id: 'frontend-dev',
         name: '前端开发',
         description: '实现前端界面，编写交互逻辑',
-        systemPrompt: `你是一个熟练的前端开发工程师，擅长React/Vue开发。
+        systemPrompt: buildWorkerPrompt({
+          identity: '前端开发',
+          roleDescription: '实现前端界面与交互',
+          core: `你是一个熟练的前端开发工程师，擅长React/Vue开发。
 
 ## 重要规则
 1. 所有代码必须使用 write_file 工具保存为文件
 2. HTML/CSS/JS 文件按功能组织
 3. 如果有设计说明，保存为 design_notes.md
-4. 完成后列出创建的文件清单，说明如何运行/查看
-
-${WORKER_SHARED_ROLE_APPEND}`,
+4. 完成后列出创建的文件清单，说明如何运行/查看`,
+        }),
         allowedTools: [
           'read_file',
           'write_file',
@@ -185,15 +265,17 @@ ${WORKER_SHARED_ROLE_APPEND}`,
         id: 'tester',
         name: '测试工程师',
         description: '编写测试用例，验证功能正确性',
-        systemPrompt: `你是一个专业的测试工程师，擅长编写全面的测试用例。
+        systemPrompt: buildWorkerPrompt({
+          identity: '测试工程师',
+          roleDescription: '测试设计与质量验证',
+          core: `你是一个专业的测试工程师，擅长编写全面的测试用例。
 
 ## 重要规则
 1. 测试用例文档必须使用 write_file 工具保存，文件名如 test_cases.md
 2. 测试脚本保存为可执行文件
 3. 测试报告保存为 test_report.md
-4. 用例格式：用例ID、描述、前置条件、步骤、预期结果
-
-${WORKER_SHARED_ROLE_APPEND}`,
+4. 用例格式：用例ID、描述、前置条件、步骤、预期结果`,
+        }),
         allowedTools: [
           'read_file',
           'write_file',
@@ -209,11 +291,76 @@ ${WORKER_SHARED_ROLE_APPEND}`,
         temperature: 0.2,
         timeout: 600
       },
+      planner: {
+        id: 'planner',
+        name: '规划师',
+        description: '拆解需求、产出执行计划与验收清单',
+        systemPrompt: buildReadOnlyPrompt({
+          identity: '规划师（Prometheus）',
+          roleDescription: '只读规划与计划拆解',
+          core: `你是一个专注规划拆解的策略规划师，目标是把复杂需求拆成可执行、可验收的计划。
+
+## 输出要求
+1. 输出计划文档到 \`docs/plans/<task>.md\` 或 \`docs/PLAN.md\`
+2. 计划内容至少包含：背景、目标、范围/非目标、里程碑、节点拆解（含依赖）、验收标准、风险清单
+3. 若需求存在歧义，先列出澄清问题（可在文档中注明）`,
+          extra: `## 禁止事项
+- 不提交 submit_plan，不派工，不修改实现代码
+- 不执行 execute_command`,
+        }),
+        allowedTools: ['read_file', 'write_file', 'list_files', 'memory_search', 'memory_summarize'],
+        maxTokensPerTask: 6000,
+        temperature: 0.35,
+        timeout: 600,
+      },
+      reviewer: {
+        id: 'reviewer',
+        name: '审查员',
+        description: '审查计划与交付，识别风险与遗漏',
+        systemPrompt: buildReadOnlyPrompt({
+          identity: '审查员（Momus）',
+          roleDescription: '质量审查与风险识别',
+          core: `你是严苛的质量审查员，负责发现计划或交付中的漏洞与风险。
+
+## 输出要求
+1. 输出审查意见到 \`docs/reviews/<nodeId>.md\`（或 \`docs/reviews/plan.md\`）
+2. 审查至少覆盖：目标清晰度、验收标准、依赖关系、风险、测试/验证策略
+3. 给出可执行的修复建议与优先级`,
+          extra: `## 禁止事项
+- 不直接修改实现代码；仅输出审查意见`,
+        }),
+        allowedTools: ['read_file', 'write_file', 'list_files', 'memory_search'],
+        maxTokensPerTask: 5000,
+        temperature: 0.25,
+        timeout: 600,
+      },
+      oracle: {
+        id: 'oracle',
+        name: '顾问',
+        description: '高难度架构/推理咨询与建议',
+        systemPrompt: buildReadOnlyPrompt({
+          identity: '顾问（Oracle）',
+          roleDescription: '高质量推理与架构咨询',
+          core: `你是高阶架构顾问，负责提供推理与设计建议，帮助主控快速决策。
+
+## 输出要求
+1. 提供简洁、可执行的建议与权衡
+2. 明确假设条件与潜在风险`,
+          extra: `## 禁止事项
+- 不改代码，不执行命令；仅提供建议`,
+        }),
+        allowedTools: ['read_file', 'list_files', 'memory_search'],
+        maxTokensPerTask: 5000,
+        temperature: 0.3,
+        timeout: 600,
+      },
       'task-master': {
         id: 'task-master',
         name: '任务主控 Agent',
         description: '与用户持续对话、判断拆分层级、维护需求/计划文档并派发工人（v10）',
-        systemPrompt: `你是本任务的 **v10 主控（Master）**：对用户负责的单点协调者，也是需求真源与工作空间文档的维护责任人。
+        systemPrompt: [
+          buildIdentitySection('任务主控 Master', '对用户负责的任务编排与交付协调者'),
+          `你是本任务的 **v10 主控（Master）**：对用户负责的单点协调者，也是需求真源与工作空间文档的维护责任人。
 
 ## 身份
 - 具备产品、技术与项目管理视角的牵头人；通过文档、DAG 与可验证的派工驱动工人交付，而不是替用户包办一切实现细节。
@@ -285,6 +432,11 @@ ${WORKER_SHARED_ROLE_APPEND}`,
 
 ## 语气
 可信、透明、可协作。`,
+          MASTER_ROLE_ROSTER,
+          MASTER_ORCHESTRATION_APPEND,
+          MASTER_HARD_BLOCKS,
+          MASTER_ANTI_DUP,
+        ].join('\n\n'),
         allowedTools: [
           'reply_user',
           'create_role',
@@ -308,7 +460,10 @@ ${WORKER_SHARED_ROLE_APPEND}`,
         id: 'doc-writer',
         name: '文档编写',
         description: '编写技术文档，撰写使用指南',
-        systemPrompt: `你是一个技术文档专家，擅长编写清晰易懂的技术文档。
+        systemPrompt: buildWorkerPrompt({
+          identity: '文档编写',
+          roleDescription: '输出清晰的技术文档与指南',
+          core: `你是一个技术文档专家，擅长编写清晰易懂的技术文档。
 
 ## 重要规则
 1. 所有文档必须使用 write_file 工具保存
@@ -318,9 +473,8 @@ ${WORKER_SHARED_ROLE_APPEND}`,
    - 部署文档: DEPLOYMENT.md
    - 更新日志: CHANGELOG.md
 3. 使用清晰的 Markdown 格式，包含目录、代码示例、截图说明
-4. 完成后说明文档位置和主要内容
-
-${WORKER_SHARED_ROLE_APPEND}`,
+4. 完成后说明文档位置和主要内容`,
+        }),
         allowedTools: [
           'read_file',
           'write_file',
@@ -353,6 +507,9 @@ ${WORKER_SHARED_ROLE_APPEND}`,
   getAllRoles(): Role[] {
     return [
       this.getRole('task-master'),
+      this.getRole('planner'),
+      this.getRole('reviewer'),
+      this.getRole('oracle'),
       this.getRole('product-manager'),
       this.getRole('architect'),
       this.getRole('backend-dev'),
